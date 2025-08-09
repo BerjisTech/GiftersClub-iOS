@@ -91,36 +91,7 @@ struct ProfileView: View {
     var body: some View {
         DrawerHost {
             ZStack(alignment: .top) {
-                NavigationStack {
-                    VStack(spacing: 16) {
-                        Text("Profile")
-                        GradientButton(title: "Show Success Banner", state: btnState) {
-                            banners.show(Banner(title: "Your post has been created", style: .success))
-                            btnState = .success
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { btnState = .normal }
-                        }
-                        GradientButton(title: "Open Drawer", state: .normal) {
-                            drawer.present(DrawerModel(
-                                title: "Subscribe",
-                                message: "Subscribe to @creator to unlock posts",
-                                primaryTitle: "Subscribe",
-                                primaryAction: { drawer.dismiss() },
-                                secondaryTitle: "Not now",
-                                secondaryAction: { drawer.dismiss() }
-                            ))
-                        }
-                        Button("Sign out") { Task { await SupabaseManager.shared.signOut() } }
-                    }
-                    .navigationDestination(isPresented: $showGifter) {
-                        GifterProfileView(username: username ?? "")
-                    }
-                    .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
-                        if let u = note.object as? String {
-                            username = u
-                            showGifter = true
-                        }
-                    }
-                }
+                NavigationStack { ProfileDetailView(username: nil, userId: nil) }
                 .environmentObject(banners)
                 BannerHost().environmentObject(banners)
             }
@@ -136,5 +107,16 @@ struct WishlistDetailView: View {
 
 struct GifterProfileView: View {
     let username: String
-    var body: some View { Text("@\(username)").padding() }
+    @StateObject private var banners = BannerQueue()
+    @StateObject private var drawer = DrawerManager()
+    var body: some View {
+        DrawerHost {
+            ZStack(alignment: .top) {
+                ProfileDetailView(username: username)
+                BannerHost()
+            }
+        }
+        .environmentObject(banners)
+        .environmentObject(drawer)
+    }
 }
