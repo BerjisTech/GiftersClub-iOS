@@ -31,6 +31,12 @@ struct ProfileDetailView: View {
     @State private var isLoading = true
     @State private var activeTab: ProfileTab = .posts
     @State private var giftsSort: GiftsSort = .newest
+    @State private var postThumbs: [URL] = []
+    @State private var wishlists: [SupabaseManager.DBWishlist] = []
+    @State private var gifts: [SupabaseManager.DBGift] = []
+    @State private var showAccount = false
+    @State private var showSettings = false
+    @State private var isSelfView = false
 
     var body: some View {
         NavigationStack {
@@ -51,7 +57,9 @@ struct ProfileDetailView: View {
             }
             .navigationTitle("")
             .toolbarTitleDisplayMode(.inline)
-            .task { await loadProfile() }
+            .task { await loadAll() }
+            .navigationDestination(isPresented: $showAccount) { AccountView() }
+            .navigationDestination(isPresented: $showSettings) { SettingsView() }
         }
     }
 
@@ -69,11 +77,13 @@ struct ProfileDetailView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Button(role: .destructive) { presentBlock() } label: {
-                    Label("Block user", systemImage: "hand.raised.fill")
-                }
-                Button { presentReport() } label: {
-                    Label("Report user", systemImage: "exclamationmark.bubble.fill")
+                if let _ = profile, !isSelfView {
+                    Button(role: .destructive) { presentBlock() } label: {
+                        Label("Block user", systemImage: "hand.raised.fill")
+                    }
+                    Button { presentReport() } label: {
+                        Label("Report user", systemImage: "exclamationmark.bubble.fill")
+                    }
                 }
                 Button { shareProfile() } label: {
                     Label("Share profile", systemImage: "square.and.arrow.up")
@@ -142,7 +152,7 @@ struct ProfileDetailView: View {
     @ViewBuilder
     private func buttonsRow(_ p: ProfileModel) -> some View {
         HStack(spacing: 10) {
-            if !p.isCurrentUser {
+            if !isSelfView {
                 // Follow/Friends
                 let isFriends = p.isFollowing && p.isFollowedBy
                 GradientButton(title: isFriends ? "Friends" : (p.isFollowing ? "Following" : "Follow")) {
@@ -153,8 +163,8 @@ struct ProfileDetailView: View {
                     banners.show(Banner(title: "Open chat (TODO)", style: .info))
                 }
             } else {
-                GradientButton(title: "Account") { banners.show(Banner(title: "Account (TODO)", style: .info)) }
-                GradientButton(title: "Settings") { banners.show(Banner(title: "Settings (TODO)", style: .info)) }
+                GradientButton(title: "Account") { showAccount = true }
+                GradientButton(title: "Settings") { showSettings = true }
             }
         }
     }
@@ -219,10 +229,10 @@ struct ProfileDetailView: View {
     private func tabContent() -> some View {
         switch activeTab {
         case .posts:
-            PostsGridView(userId: profile?.userId)
+            PostsGridView(thumbs: postThumbs)
                 .padding(.horizontal)
         case .wishlists:
-            WishlistsListView(userId: profile?.userId)
+            WishlistsListView(items: wishlists)
                 .padding(.horizontal)
         case .gifts:
             GiftsCatalogView(sort: giftsSort)
@@ -255,72 +265,165 @@ struct ProfileDetailView: View {
         banners.show(Banner(title: "Share link copied", style: .info))
     }
     private func toggleFollow() async {
-        guard var p = profile else { return }
-        p.isFollowing.toggle()
+        guard var p = profile, let me = supabase.user?.id.uuidString else { return }
+        let newFollow = !p.isFollowing
+        // optimistic
+        p.isFollowing = newFollow
         profile = p
-        // TODO: Call Supabase RPC to follow/unfollow
+        do {
+            try await supabase.setFollow(currentUserId: me, targetUserId: p.userId, follow: newFollow)
+            // optionally refresh follow-back status
+        } catch {
+            // revert on error
+            p.isFollowing.toggle()
+            profile = p
+            banners.show(Banner(title: "Failed to update follow", style: .error))
+        }
     }
 
     // MARK: - Data
-    private func loadProfile() async {
+    private func loadAll() async {
         isLoading = true
         defer { isLoading = false }
-        // TODO: fetch from Supabase; stubbed for now
-        let isSelf = (username == nil && userId == nil)
-        let currentUsername = supabase.user?.email?.split(separator: "@").first.map(String.init) ?? "me"
-        profile = ProfileModel(
-            userId: userId ?? (supabase.user.map { $0.id.uuidString }) ?? UUID().uuidString,
-            username: username ?? currentUsername,
-            name: "User Name",
-            bio: "This is a short bio about the user.",
-            imageURL: nil,
-            followers: 123,
-            following: 45,
-            isCurrentUser: isSelf,
-            isFollowing: false,
-            isFollowedBy: false
-        )
+        do {
+            // Determine which profile to load
+            let authedId = supabase.user?.id.uuidString
+            let targetUserId = userId ?? authedId
+            // If neither username nor userId available and not authed, nothing to load
+            if username == nil && targetUserId == nil { return }
+
+            // Fetch the target profile (by username or userId)
+            guard let db = try await supabase.fetchProfile(username: username, userId: targetUserId) else { return }
+
+            // Self-view if loaded profile's user_id equals authenticated user's id (robust UUID compare)
+            let selfView: Bool = {
+                if let authedUUID = supabase.user?.id, let targetUUID = UUID(uuidString: db.user_id) {
+                    return authedUUID == targetUUID
+                }
+                if let authedId {
+                    let a = authedId.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let b = db.user_id.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return b.caseInsensitiveCompare(a) == .orderedSame
+                }
+                return false
+            }()
+            isSelfView = selfView
+
+            var isFollowing = false
+            var isFollowedBy = false
+            if let authedId, !selfView {
+                isFollowing = (try? await supabase.isFollowing(currentUserId: authedId, targetUserId: db.user_id)) ?? false
+                isFollowedBy = (try? await supabase.isFollowing(currentUserId: db.user_id, targetUserId: authedId)) ?? false
+            }
+
+            profile = ProfileModel(
+                userId: db.user_id,
+                username: db.username,
+                name: db.name ?? "",
+                bio: db.bio ?? "",
+                imageURL: db.image.flatMap(URL.init(string:)),
+                followers: db.followers_count ?? 0,
+                following: db.following_count ?? 0,
+                isCurrentUser: selfView,
+                isFollowing: isFollowing,
+                isFollowedBy: isFollowedBy
+            )
+
+            // Load tab data for that profile
+            postThumbs = (try? await supabase.fetchUserPostThumbs(userId: db.user_id, limit: 20)) ?? []
+            wishlists = (try? await supabase.fetchWishlists(userId: db.user_id, limit: 20)) ?? []
+            gifts = (try? await supabase.fetchGifts(sort: mapSort(giftsSort), limit: 40)) ?? []
+        } catch {
+            banners.show(Banner(title: "Failed to load profile", style: .error))
+        }
+    }
+
+    private func mapSort(_ s: GiftsSort) -> SupabaseManager.GiftsSortKey {
+        switch s {
+        case .newest: return .newest
+        case .popular: return .popular
+        case .priceAsc: return .priceAsc
+        case .priceDesc: return .priceDesc
+        }
     }
 }
 
 // MARK: - Tab Content Placeholders
 private struct PostsGridView: View {
-    let userId: String?
+    let thumbs: [URL]
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(0..<8, id: \.self) { _ in
-                ShimmerView().frame(height: 140)
+        if thumbs.isEmpty {
+            VStack(spacing: 8) { Text("No posts yet").foregroundStyle(.secondary) }
+                .padding(.vertical, 16)
+        } else {
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(thumbs, id: \.self) { url in
+                    AsyncImage(url: url) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        ShimmerView()
+                    }
+                    .frame(height: 140)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
             }
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 8)
     }
 }
 
 private struct WishlistsListView: View {
-    let userId: String?
+    let items: [SupabaseManager.DBWishlist]
     var body: some View {
-        VStack(spacing: 8) {
-            ForEach(0..<5, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06)).frame(height: 56)
+        if items.isEmpty {
+            VStack(spacing: 8) { Text("No wishlists yet").foregroundStyle(.secondary) }
+                .padding(.vertical, 16)
+        } else {
+            VStack(spacing: 8) {
+                ForEach(items, id: \.id) { w in
+                    HStack {
+                        RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 44, height: 44)
+                        Text(w.title ?? "Untitled wishlist").font(.subheadline)
+                        Spacer()
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
+                }
             }
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 8)
     }
 }
 
-    private struct GiftsCatalogView: View {
-        let sort: GiftsSort
-        private let columns = [GridItem(.flexible()), GridItem(.flexible())]
-        var body: some View {
-            LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(0..<10, id: \.self) { _ in
+private struct GiftsCatalogView: View {
+    let sort: GiftsSort
+    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
+    private let supabase = SupabaseManager.shared
+    @State private var items: [SupabaseManager.DBGift] = []
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            ForEach(items, id: \.id) { g in
                 VStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06)).frame(height: 100)
-                    Text("Gift name").font(.caption)
+                    if let src = g.image, let url = URL(string: src) {
+                        AsyncImage(url: url) { img in
+                            img.resizable().scaledToFill()
+                        } placeholder: { ShimmerView() }
+                        .frame(height: 100)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06)).frame(height: 100)
+                    }
+                    Text(g.name ?? "Gift").font(.caption)
                 }
             }
         }
         .padding(.vertical, 8)
+        .task { await load() }
+    }
+    private func load() async {
+        let key: SupabaseManager.GiftsSortKey
+        switch sort { case .newest: key = .newest; case .popular: key = .popular; case .priceAsc: key = .priceAsc; case .priceDesc: key = .priceDesc }
+        items = (try? await supabase.fetchGifts(sort: key, limit: 40)) ?? []
     }
 }
