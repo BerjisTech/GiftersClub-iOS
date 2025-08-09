@@ -44,7 +44,6 @@ struct ProfileDetailView: View {
                             tabContent()
                         } header: {
                             tabsBar()
-                                .background(.ultraThinMaterial)
                         }
                     }
                 }
@@ -161,31 +160,59 @@ struct ProfileDetailView: View {
     }
 
     private func tabsBar() -> some View {
-        VStack(spacing: 8) {
-            Picker("Tab", selection: $activeTab) {
-                ForEach(ProfileTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-
-            if activeTab == .gifts {
-                // Inline sort control for Gifts
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.up.arrow.down")
-                    Picker("Sort", selection: $giftsSort) {
-                        ForEach(GiftsSort.allCases, id: \.self) { s in
-                            Text(s.rawValue).tag(s)
+        VStack(spacing: 6) {
+            GeometryReader { geo in
+                let width = geo.size.width
+                let count = CGFloat(ProfileTab.allCases.count)
+                let tabWidth = width / max(count, 1)
+                ZStack(alignment: .bottomLeading) {
+                    HStack(spacing: 0) {
+                        ForEach(ProfileTab.allCases, id: \.self) { tab in
+                            Button(action: { withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { activeTab = tab } }) {
+                                Text(tab.rawValue)
+                                    .font(.subheadline.weight(activeTab == tab ? .semibold : .regular))
+                                    .foregroundStyle(activeTab == tab ? Color.primary : .secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 28)
+                            }
                         }
                     }
-                    .pickerStyle(.segmented)
+                    // Tiny underline indicator
+                    Rectangle()
+                        .fill(AppColors.primaryEnd)
+                        .frame(width: 24, height: 2)
+                        .offset(x: CGFloat(tabIndex(activeTab)) * tabWidth + (tabWidth - 24) / 2)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: activeTab)
+                }
+            }
+            .frame(height: 30)
+
+            if activeTab == .gifts {
+                HStack {
+                    Menu {
+                        ForEach(GiftsSort.allCases, id: \.self) { s in
+                            Button(action: { giftsSort = s }) { Text(s.rawValue) }
+                        }
+                    } label: {
+                        Label("Sort: \(giftsSort.rawValue)", systemImage: "arrow.up.arrow.down")
+                    }
+                    Spacer()
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 6)
             }
+
+            Divider()
         }
-        .padding(.vertical, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private func tabIndex(_ tab: ProfileTab) -> Int {
+        switch tab {
+        case .posts: return 0
+        case .wishlists: return 1
+        case .gifts: return 2
+        }
     }
 
     @ViewBuilder
