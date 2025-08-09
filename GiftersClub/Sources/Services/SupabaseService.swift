@@ -93,12 +93,18 @@ final class SupabaseManager: ObservableObject {
         let image: String?
         let followers_count: Int?
         let following_count: Int?
+        let token_balance: Int?
+        let tokens_sent: Int?
+        let tokens_received: Int?
     }
 
     struct DBPost: Decodable { let id: String; let user_id: String }
     struct DBPostMedia: Decodable { let post_id: String; let url: String; let order: Int? }
     struct DBWishlist: Decodable { let id: String; let title: String? }
     struct DBGift: Decodable { let id: String; let name: String?; let tokens: Int?; let image: String? }
+    struct DBBlocked: Decodable { let blocked_user_id: String }
+    struct DBFilteredWord: Decodable { let word: String }
+    struct CountRow: Decodable { let id: String }
 
     // MARK: - Profile Fetch
     func fetchProfile(username: String?, userId: String?) async throws -> DBProfile? {
@@ -107,7 +113,6 @@ final class SupabaseManager: ObservableObject {
                 .from("profiles")
                 .select()
                 .eq("username", value: u)
-                .limit(1)
                 .execute()
             return res.value.first
         }
@@ -116,7 +121,6 @@ final class SupabaseManager: ObservableObject {
                 .from("profiles")
                 .select()
                 .eq("user_id", value: id)
-                .limit(1)
                 .execute()
             return res.value.first
         }
@@ -126,7 +130,6 @@ final class SupabaseManager: ObservableObject {
             .from("profiles")
             .select()
             .eq("user_id", value: me)
-            .limit(1)
             .execute()
         return res.value.first
     }
@@ -216,6 +219,204 @@ final class SupabaseManager: ObservableObject {
             }
         }()
         let res: PostgrestResponse<[DBGift]> = try await ordered.limit(limit).execute()
+        return res.value
+    }
+
+    // MARK: - Update Profile (partial)
+    struct PartialProfile: Encodable {
+        var username: String?
+        var name: String?
+        var bio: String?
+        var image: String?
+    }
+    func updateProfile(userId: String, updates: PartialProfile) async throws -> DBProfile? {
+        let res: PostgrestResponse<[DBProfile]> = try await client
+            .from("profiles")
+            .update(updates)
+            .eq("user_id", value: userId)
+            .select()
+            .execute()
+        return res.value.first
+    }
+
+    // MARK: - Functions helpers
+    func currentAccessToken() async -> String? {
+        return try? await client.auth.session.accessToken
+    }
+
+    struct PresignRequest: Encodable {
+        let fileName: String
+        let fileType: String
+        let bucket: String
+        let overwrite: Bool
+    }
+    struct PresignResponse: Decodable { let uploadUrl: String; let publicUrl: String }
+
+    /// Upload avatar bytes to S3 via Supabase Edge Function and return the public URL
+    func uploadAvatar(imageData: Data, mimeType: String = "image/jpeg") async throws -> String {
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        let filename = "profile-\(me).jpg"
+        // Call Edge Function to get presigned URL
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/upload-media")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = await currentAccessToken() {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = PresignRequest(fileName: filename, fileType: mimeType, bucket: "profile", overwrite: true)
+        req.httpBody = try JSONEncoder().encode(body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let presign = try JSONDecoder().decode(PresignResponse.self, from: data)
+        // PUT to S3
+        guard let uploadURL = URL(string: presign.uploadUrl) else { throw URLError(.badURL) }
+        var put = URLRequest(url: uploadURL)
+        put.httpMethod = "PUT"
+        put.addValue(mimeType, forHTTPHeaderField: "Content-Type")
+        let _ = try await URLSession.shared.upload(for: put, from: imageData)
+        return presign.publicUrl
+    }
+
+    // MARK: - Security (Block/Unblock)
+    func fetchBlockedUsers() async throws -> [DBProfile] {
+        guard let me = user?.id.uuidString else { return [] }
+        let blocks: PostgrestResponse<[DBBlocked]> = try await client
+            .from("user_blocks")
+            .select("blocked_user_id")
+            .eq("blocker_user_id", value: me)
+            .execute()
+        let ids = blocks.value.map { $0.blocked_user_id }
+        guard !ids.isEmpty else { return [] }
+        let res: PostgrestResponse<[DBProfile]> = try await client
+            .from("profiles")
+            .select("user_id,username,image")
+            .in("user_id", values: ids)
+            .execute()
+        return res.value
+    }
+
+    func blockUser(targetUserId: String) async throws {
+        guard let me = user?.id.uuidString else { return }
+        _ = try await client
+            .from("user_blocks")
+            .insert([["blocker_user_id": me, "blocked_user_id": targetUserId]])
+            .execute()
+    }
+
+    func unblockUser(targetUserId: String) async throws {
+        guard let me = user?.id.uuidString else { return }
+        _ = try await client
+            .from("user_blocks")
+            .delete()
+            .eq("blocker_user_id", value: me)
+            .eq("blocked_user_id", value: targetUserId)
+            .execute()
+    }
+
+    func findUserId(byUsername username: String) async throws -> String? {
+        let res: PostgrestResponse<[DBProfile]> = try await client
+            .from("profiles")
+            .select("user_id,username")
+            .eq("username", value: username)
+            .limit(1)
+            .execute()
+        return res.value.first?.user_id
+    }
+
+    // MARK: - Moderation (Filtered words)
+    func fetchFilteredWords() async throws -> [String] {
+        guard let me = user?.id.uuidString else { return [] }
+        let res: PostgrestResponse<[DBFilteredWord]> = try await client
+            .from("filtered_words")
+            .select("word")
+            .eq("user_id", value: me)
+            .order("created_at", ascending: false)
+            .execute()
+        return res.value.map { $0.word }
+    }
+
+    func addFilteredWord(_ word: String) async throws {
+        guard let me = user?.id.uuidString else { return }
+        _ = try await client
+            .from("filtered_words")
+            .insert([["user_id": me, "word": word]])
+            .execute()
+    }
+
+    func removeFilteredWord(_ word: String) async throws {
+        guard let me = user?.id.uuidString else { return }
+        _ = try await client
+            .from("filtered_words")
+            .delete()
+            .eq("user_id", value: me)
+            .eq("word", value: word)
+            .execute()
+    }
+
+    // MARK: - Account counts
+    func giftCounts(userId: String) async throws -> (sent: Int, received: Int) {
+        let sentRes: PostgrestResponse<[CountRow]> = try await client
+            .from("gift_sent")
+            .select("id")
+            .eq("gifter", value: userId)
+            .execute()
+        let recvRes: PostgrestResponse<[CountRow]> = try await client
+            .from("gift_sent")
+            .select("id")
+            .eq("recipient", value: userId)
+            .execute()
+        return (sentRes.value.count, recvRes.value.count)
+    }
+
+    func wishlistCounts(userId: String) async throws -> (open: Int, fulfilled: Int) {
+        let openRes: PostgrestResponse<[CountRow]> = try await client
+            .from("wishlists")
+            .select("id")
+            .eq("user_id", value: userId)
+            .eq("is_fulfilled", value: false)
+            .execute()
+        let fullRes: PostgrestResponse<[CountRow]> = try await client
+            .from("wishlists")
+            .select("id")
+            .eq("user_id", value: userId)
+            .eq("is_fulfilled", value: true)
+            .execute()
+        return (openRes.value.count, fullRes.value.count)
+    }
+
+    // MARK: - Report user
+    func reportUser(reportedUserId: String, reason: String) async throws {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/report-user")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload = ["reportedUserId": reportedUserId, "reason": reason]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    // MARK: - User search (by username prefix)
+    func searchUsers(prefix: String, limit: Int = 10) async throws -> [DBProfile] {
+        guard !prefix.isEmpty else { return [] }
+        var builder = client
+            .from("profiles")
+            .select("user_id,username,image")
+            .ilike("username", pattern: "\(prefix)%")
+        if let me = user?.id.uuidString {
+            builder = builder.neq("user_id", value: me)
+        }
+        let res: PostgrestResponse<[DBProfile]> = try await builder.limit(limit).execute()
         return res.value
     }
 }

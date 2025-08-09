@@ -58,6 +58,7 @@ struct BannerHost: View {
         }
         .padding(.horizontal, 8)
         .padding(.top, 8)
+        .allowsHitTesting(!queue.banners.isEmpty)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(
             .spring(response: 0.35, dampingFraction: 0.9),

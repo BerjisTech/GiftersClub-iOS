@@ -37,6 +37,8 @@ struct ProfileDetailView: View {
     @State private var showAccount = false
     @State private var showSettings = false
     @State private var isSelfView = false
+    @State private var hasLoadedOnce = false
+    private var loadKey: String { (username ?? "") + "|" + (userId ?? "") }
 
     var body: some View {
         NavigationStack {
@@ -57,7 +59,12 @@ struct ProfileDetailView: View {
             }
             .navigationTitle("")
             .toolbarTitleDisplayMode(.inline)
-            .task { await loadAll() }
+            .task(id: loadKey) {
+                if !hasLoadedOnce {
+                    await loadAll()
+                    hasLoadedOnce = true
+                }
+            }
             .navigationDestination(isPresented: $showAccount) { AccountView() }
             .navigationDestination(isPresented: $showSettings) { SettingsView() }
         }
@@ -334,7 +341,8 @@ struct ProfileDetailView: View {
             wishlists = (try? await supabase.fetchWishlists(userId: db.user_id, limit: 20)) ?? []
             gifts = (try? await supabase.fetchGifts(sort: mapSort(giftsSort), limit: 40)) ?? []
         } catch {
-            banners.show(Banner(title: "Failed to load profile", style: .error))
+            // Avoid spamming banners on transient errors; load quietly
+            // You can add a single-shot banner here if desired
         }
     }
 
