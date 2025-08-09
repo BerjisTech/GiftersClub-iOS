@@ -85,24 +85,47 @@ struct WishlistsView: View {
 struct ProfileView: View {
     @State private var showGifter = false
     @State private var username: String? = nil
+    @StateObject private var banners = BannerQueue()
+    @StateObject private var drawer = DrawerManager()
+    @State private var btnState: GradientButtonState = .normal
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                Text("Profile")
-                Button("Sign out") {
-                    Task { await SupabaseManager.shared.signOut() }
+        DrawerHost {
+            ZStack(alignment: .top) {
+                NavigationStack {
+                    VStack(spacing: 16) {
+                        Text("Profile")
+                        GradientButton(title: "Show Success Banner", state: btnState) {
+                            banners.show(Banner(title: "Your post has been created", style: .success))
+                            btnState = .success
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { btnState = .normal }
+                        }
+                        GradientButton(title: "Open Drawer", state: .normal) {
+                            drawer.present(DrawerModel(
+                                title: "Subscribe",
+                                message: "Subscribe to @creator to unlock posts",
+                                primaryTitle: "Subscribe",
+                                primaryAction: { drawer.dismiss() },
+                                secondaryTitle: "Not now",
+                                secondaryAction: { drawer.dismiss() }
+                            ))
+                        }
+                        Button("Sign out") { Task { await SupabaseManager.shared.signOut() } }
+                    }
+                    .navigationDestination(isPresented: $showGifter) {
+                        GifterProfileView(username: username ?? "")
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
+                        if let u = note.object as? String {
+                            username = u
+                            showGifter = true
+                        }
+                    }
                 }
-            }
-            .navigationDestination(isPresented: $showGifter) {
-                GifterProfileView(username: username ?? "")
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
-                if let u = note.object as? String {
-                    username = u
-                    showGifter = true
-                }
+                .environmentObject(banners)
+                BannerHost().environmentObject(banners)
             }
         }
+        .environmentObject(drawer)
     }
 }
 
@@ -115,4 +138,3 @@ struct GifterProfileView: View {
     let username: String
     var body: some View { Text("@\(username)").padding() }
 }
-
