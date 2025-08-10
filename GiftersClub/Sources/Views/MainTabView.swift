@@ -3,6 +3,7 @@ import SwiftUI
 struct MainTabView: View {
     @Binding var deepLink: DeepLink?
     @State private var selected: Int = 0
+    @State private var programmaticSelectProfile = false
 
     var body: some View {
         TabView(selection: $selected) {
@@ -22,8 +23,15 @@ struct MainTabView: View {
                 .tabItem { Label("Profile", systemImage: "person.crop.circle.fill") }
                 .tag(4)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
+        .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { _ in
+            programmaticSelectProfile = true
             selected = 4
+        }
+        .onChange(of: selected) { _, newValue in
+            if newValue == 4 && programmaticSelectProfile == false {
+                NotificationCenter.default.post(name: .showCurrentProfile, object: nil)
+            }
+            if newValue != 4 { programmaticSelectProfile = false }
         }
         .onChange(of: deepLink) { _, link in
             guard let link else { return }
@@ -55,6 +63,7 @@ struct MainTabView: View {
 extension Notification.Name {
     static let showWishlistDetail = Notification.Name("showWishlistDetail")
     static let showGifterProfile = Notification.Name("showGifterProfile")
+    static let showCurrentProfile = Notification.Name("showCurrentProfile")
 }
 
 // MARK: - Placeholder Tab Views
@@ -107,6 +116,10 @@ struct ProfileView: View {
         .environmentObject(drawer)
         .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
             if let u = note.object as? String { username = u; showGifter = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showCurrentProfile)) { _ in
+            username = nil
+            showGifter = false
         }
     }
 }
