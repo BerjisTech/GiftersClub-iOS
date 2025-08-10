@@ -70,7 +70,7 @@ extension Notification.Name {
 
 // HomeView implemented in Feed/FeedView.swift
 // ExploreView implemented in Explore/ExploreView.swift
-struct ChatListView: View { var body: some View { Text("Chats").frame(maxWidth: .infinity, maxHeight: .infinity) } }
+// ChatListView implemented in Views/Chat/ChatListView.swift
 
 struct WishlistsView: View {
     @State private var showDetail = false

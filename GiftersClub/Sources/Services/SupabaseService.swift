@@ -102,6 +102,10 @@ final class SupabaseManager: ObservableObject {
     struct DBPostMedia: Decodable { let post_id: String; let url: String; let order: Int? }
     struct DBWishlist: Decodable { let id: String; let title: String? }
     struct DBGift: Decodable { let id: String; let name: String?; let tokens: Int?; let image: String? }
+    struct DBAttachment: Decodable { let url: String?; let type: String? }
+    struct DBMessage: Decodable { let id: String; let sender_id: String; let receiver_id: String; let content: String; let created_at: String; let attachments: [DBAttachment]? }
+    struct DBNotification: Decodable { let id: String; let user_id: String; let type: String; let reference_id: String?; let message: String; let is_read: Bool; let created_at: String; let updated_at: String?; let sender_id: String? }
+    struct DBConversationDetails: Decodable { let user_a: String; let user_b: String; let last_message_at: String; let partner_id: String; let partner_name: String?; let partner_image: String?; let unread_count: Int; let last_message_id: String?; let last_message_content: String?; let last_message_attachments: [DBAttachment]? }
     struct DBBlocked: Decodable { let blocked_user_id: String }
     struct DBFilteredWord: Decodable { let word: String }
     struct CountRow: Decodable { let id: String }
@@ -415,6 +419,82 @@ final class SupabaseManager: ObservableObject {
             .select()
             .execute()
         return res.value.first
+    }
+
+    // MARK: - Chats & Notifications
+    func fetchConversationDetails(limit: Int = 100) async throws -> [DBConversationDetails] {
+        let res: PostgrestResponse<[DBConversationDetails]> = try await client
+            .from("conversation_details")
+            .select("*")
+            .order("last_message_at", ascending: false)
+            .limit(limit)
+            .execute()
+        return res.value
+    }
+
+    func fetchNotifications(userId: String? = nil, limit: Int = 200) async throws -> [DBNotification] {
+        let uid = try await resolvedUserId(explicit: userId)
+        let q = client
+            .from("notifications")
+            .select("*")
+            .eq("user_id", value: uid)
+            .order("created_at", ascending: false)
+            .limit(limit)
+        let res: PostgrestResponse<[DBNotification]> = try await q.execute()
+        return res.value
+    }
+
+    func markNotificationRead(id: String) async throws {
+        struct Patch: Encodable { let is_read: Bool }
+        _ = try await client
+            .from("notifications")
+            .update(Patch(is_read: true))
+            .eq("id", value: id)
+            .select()
+            .execute()
+    }
+
+    func fetchMessages(partnerId: String, orderAsc: Bool = true, sinceISO: String? = nil) async throws -> [DBMessage] {
+        let me = try await resolvedUserId(explicit: nil)
+        var q = client
+            .from("messages")
+            .select("id,sender_id,receiver_id,content,created_at,attachments")
+            .or("and(sender_id.eq.\(me),receiver_id.eq.\(partnerId)),and(sender_id.eq.\(partnerId),receiver_id.eq.\(me))")
+        if let sinceISO { q = q.gte("created_at", value: sinceISO) }
+        let res: PostgrestResponse<[DBMessage]> = try await q
+            .order("created_at", ascending: orderAsc)
+            .execute()
+        return res.value
+    }
+
+    func markMessagesAsRead(partnerId: String, readAtISO: String = ISO8601DateFormatter().string(from: Date())) async throws {
+        let me = try await resolvedUserId(explicit: nil)
+        struct Patch: Encodable { let read_at: String }
+        _ = try await client
+            .from("messages")
+            .update(Patch(read_at: readAtISO))
+            .eq("sender_id", value: partnerId)
+            .eq("receiver_id", value: me)
+            .is("read_at", value: nil)
+            .execute()
+    }
+
+    struct InsertMessage: Encodable { let sender_id: String; let receiver_id: String; let content: String }
+    func sendMessage(to partnerId: String, content: String) async throws -> DBMessage? {
+        let me = try await resolvedUserId(explicit: nil)
+        let payload = InsertMessage(sender_id: me, receiver_id: partnerId, content: content)
+        let res: PostgrestResponse<[DBMessage]> = try await client
+            .from("messages")
+            .insert([payload])
+            .select("id,sender_id,receiver_id,content,created_at,attachments")
+            .execute()
+        return res.value.first
+    }
+
+    private func resolvedUserId(explicit: String?) async throws -> String {
+        if let id = explicit { return id }
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        return me
     }
 
     // MARK: - Functions helpers
