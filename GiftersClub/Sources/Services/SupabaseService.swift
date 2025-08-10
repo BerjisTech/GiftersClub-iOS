@@ -107,7 +107,7 @@ final class SupabaseManager: ObservableObject {
     struct CountRow: Decodable { let id: String }
 
     // MARK: - Feed RPC DTOs
-    struct FeedRPCProfile: Decodable { let id: String?; let user_id: String?; let username: String?; let image: String? }
+    struct FeedRPCProfile: Decodable { let id: String?; let user_id: String?; let username: String?; let name: String?; let image: String? }
     struct FeedRPCMedia: Decodable { let id: String?; let media_type: String?; let url: String?; let order: Int?; let created_at: String? }
     struct FeedRPCRow: Decodable {
         let id: String
@@ -129,6 +129,103 @@ final class SupabaseManager: ObservableObject {
             .rpc("get_feed_posts", params: params)
             .execute()
         return res.value
+    }
+
+    // MARK: - Explore Search RPC
+    struct ExplorePost: Decodable, Identifiable, Hashable {
+        let id: String
+        let user_id: String
+        let content: String?
+        let media: [FeedRPCMedia]?
+        let profile: FeedRPCProfile?
+        static func == (lhs: ExplorePost, rhs: ExplorePost) -> Bool { lhs.id == rhs.id }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
+    struct ExploreUser: Decodable, Identifiable, Hashable {
+        let user_id: String
+        let username: String
+        let name: String?
+        let image: String?
+        var id: String { user_id }
+    }
+    struct ExploreResult: Decodable {
+        let top: [ExplorePost]
+        let videos: [ExplorePost]
+        let photos: [ExplorePost]
+        let users: [ExploreUser]
+        let live: [JSONValue]?
+    }
+    /// Minimal JSON value wrapper to decode unknown live object arrays without failing
+    struct JSONValue: Decodable {}
+
+    func searchExplore(query: String) async throws -> ExploreResult {
+        struct RPCResult: Decodable { let top: [ExplorePost]; let videos: [ExplorePost]; let photos: [ExplorePost]; let users: [ExploreUser]; let live: [JSONValue]? }
+        let res: PostgrestResponse<RPCResult> = try await client
+            .rpc("search_explore", params: ["q": query])
+            .execute()
+        return ExploreResult(top: res.value.top, videos: res.value.videos, photos: res.value.photos, users: res.value.users, live: res.value.live)
+    }
+
+    // MARK: - Search Suggestions
+    func fetchRecentSearches(limit: Int = 8) async throws -> [String] {
+        guard let me = user?.id.uuidString else { return [] }
+        struct Row: Decodable { let query: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("search_queries")
+            .select("query")
+            .eq("user_id", value: me)
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+        // dedupe while preserving order
+        var seen = Set<String>(); var out: [String] = []
+        for r in res.value { if !seen.contains(r.query) { out.append(r.query); seen.insert(r.query) } }
+        return out
+    }
+
+    func fetchTrendingSearches(limit: Int = 8, windowDays: Int = 30) async throws -> [String] {
+        // Prefer server-side grouping via RPC if available
+        struct TrendingRow: Decodable { let query: String; let count: Int? }
+        do {
+            let res: PostgrestResponse<[TrendingRow]> = try await client
+                .rpc("search_trending", params: ["limit": limit, "window_days": windowDays])
+                .execute()
+            let qs = res.value.map { $0.query }
+            if !qs.isEmpty { return qs }
+        } catch {
+            // Fall back to client-side aggregation below
+        }
+
+        // Fallback: Trending = most frequent queries within a recent time window (default 30 days), case-insensitive
+        struct Row: Decodable { let query: String }
+        let since = Calendar.current.date(byAdding: .day, value: -windowDays, to: Date()) ?? Date(timeIntervalSinceNow: -30*24*3600)
+        let iso = ISO8601DateFormatter().string(from: since)
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("search_queries")
+            .select("query,created_at")
+            .gte("created_at", value: iso)
+            .limit(5000)
+            .execute()
+        var freq: [String: Int] = [:]
+        for r in res.value {
+            let key = r.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !key.isEmpty else { continue }
+            freq[key, default: 0] += 1
+        }
+        let sorted = freq.sorted { lhs, rhs in
+            if lhs.value == rhs.value { return lhs.key < rhs.key }
+            return lhs.value > rhs.value
+        }.map { $0.key }
+        return Array(sorted.prefix(limit))
+    }
+
+    func recordSearchQuery(_ q: String) async {
+        guard let me = user?.id.uuidString else { return }
+        struct Row: Encodable { let user_id: String; let query: String }
+        _ = try? await client
+            .from("search_queries")
+            .insert([Row(user_id: me, query: q)])
+            .execute()
     }
 
     // MARK: - Comments

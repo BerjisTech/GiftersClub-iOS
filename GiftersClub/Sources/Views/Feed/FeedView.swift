@@ -1,6 +1,9 @@
 import SwiftUI
 import AVKit
 import UIKit
+#if canImport(DotLottie)
+import DotLottie
+#endif
 
 struct FeedPost: Identifiable, Hashable {
     struct Author: Hashable { let username: String; let name: String?; let avatarURL: URL? }
@@ -119,6 +122,7 @@ private struct PostPageView: View {
     @State private var magnify: CGFloat = 1.0
     @State private var isPaused: Bool = false
     @State private var showHeart: Bool = false
+    @State private var showBreak: Bool = false
     @State private var activeImageIndex: Int = 0
 
     var overlaysHidden: Bool { magnify > 1.01 || isPaused }
@@ -133,13 +137,36 @@ private struct PostPageView: View {
                 .simultaneousGesture(magnifyGesture)
 
             if showHeart {
+                #if canImport(DotLottie)
+                DotLottieAnimation(
+                    webURL: "https://lottie.host/fe660a41-2c70-4105-afb4-bab713f7e77b/AcLybokfnG.lottie",
+                    config: AnimationConfig(autoplay: true, loop: false)
+                ).view()
+                    .frame(width: 220, height: 220)
+                    .transition(.scale)
+                    .allowsHitTesting(false)
+                    .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { showHeart = false } }
+                #else
                 Image(systemName: "heart.fill")
                     .font(.system(size: 120))
                     .foregroundStyle(.red)
-                    .opacity(showHeart ? 0.9 : 0)
-                    .scaleEffect(showHeart ? 1.0 : 0.6)
+                    .opacity(0.95)
                     .transition(.scale)
                     .allowsHitTesting(false)
+                    .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { showHeart = false } }
+                #endif
+            }
+            if showBreak {
+                #if canImport(DotLottie)
+                DotLottieAnimation(
+                    webURL: "https://lottie.host/810116a8-7247-45df-a8b2-f2d777b491f0/JDVtLuvkEG.lottie",
+                    config: AnimationConfig(autoplay: true, loop: false)
+                ).view()
+                    .frame(width: 180, height: 180)
+                    .transition(.scale)
+                    .allowsHitTesting(false)
+                    .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { showBreak = false } }
+                #endif
             }
 
             // Overlays
@@ -179,7 +206,6 @@ private struct PostPageView: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                     }
-                    .onTapGesture { NotificationCenter.default.post(name: .showGifterProfile, object: post.author.username) }
                     .onTapGesture { openPoster() }
                     VStack(alignment: .leading, spacing: 4) {
                         Text(post.caption)
@@ -212,7 +238,7 @@ private struct PostPageView: View {
                             .font(.title2.weight(.semibold))
                         Text("\(post.likes)").foregroundStyle(.white).font(.caption2)
                     }
-                    .onTapGesture { toggleLike() }
+                    .onTapGesture { toggleLike(showBurst: true) }
 
                     VStack(spacing: 4) {
                         Image(systemName: "arrowshape.turn.up.forward.fill")
@@ -267,12 +293,17 @@ private struct PostPageView: View {
     }
 
     private func toggleLike(showBurst: Bool = false) {
-        post.isLiked.toggle()
-        post.likes += post.isLiked ? 1 : -1
-        Task { try? await SupabaseManager.shared.setLike(postId: post.id, like: post.isLiked) }
-        guard showBurst else { return }
-        showHeart = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { withAnimation(.easeOut(duration: 0.2)) { showHeart = false } }
+        var updated = post
+        let willLike = !updated.isLiked
+        updated.isLiked = willLike
+        updated.likes += willLike ? 1 : -1
+        post = updated
+        if willLike {
+            if showBurst { showHeart = true }
+        } else {
+            showBreak = true
+        }
+        Task { try? await SupabaseManager.shared.setLike(postId: post.id, like: willLike) }
     }
 
     private func share() {
@@ -385,9 +416,12 @@ private struct VerticalPageView<Data: RandomAccessCollection, Content: View>: UI
 
     func updateUIViewController(_ uiViewController: UIPageViewController, context: Context) {
         context.coordinator.parent = self
-        // Only rebuild pages if the data set size or identity changed
+        // Rebuild pages if the data set size or identity changed
         if context.coordinator.needsReload(for: items) {
             context.coordinator.reloadPages(controller: uiViewController)
+        } else {
+            // Otherwise, update existing controllers' root views to reflect state changes
+            context.coordinator.updatePages()
         }
         // Only jump if selection differs from current visible index
         if let current = uiViewController.viewControllers?.first,
@@ -399,7 +433,7 @@ private struct VerticalPageView<Data: RandomAccessCollection, Content: View>: UI
 
     final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
         var parent: VerticalPageView
-        var controllers: [UIViewController] = []
+        var controllers: [UIHostingController<AnyView>] = []
         private var lastIDs: [Data.Element.ID] = []
 
         init(_ parent: VerticalPageView) { self.parent = parent }
@@ -410,13 +444,13 @@ private struct VerticalPageView<Data: RandomAccessCollection, Content: View>: UI
         }
 
         func index(of viewController: UIViewController) -> Int? {
-            controllers.firstIndex(of: viewController)
+            controllers.firstIndex(where: { $0 === viewController })
         }
 
         func reloadPages(controller: UIPageViewController) {
             lastIDs = parent.items.map { $0.id }
             controllers = parent.items.enumerated().map { idx, item in
-                let host = UIHostingController(rootView: parent.content(idx, item))
+                let host = UIHostingController(rootView: AnyView(parent.content(idx, item)))
                 host.view.backgroundColor = .clear
                 return host
             }
@@ -427,6 +461,14 @@ private struct VerticalPageView<Data: RandomAccessCollection, Content: View>: UI
         func needsReload(for items: Data) -> Bool {
             let ids = items.map { $0.id }
             return ids != lastIDs || items.count != lastIDs.count
+        }
+
+        func updatePages() {
+            for (idx, item) in parent.items.enumerated() {
+                if idx < controllers.count {
+                    controllers[idx].rootView = AnyView(parent.content(idx, item))
+                }
+            }
         }
 
         func goTo(targetIndex: Int, controller: UIPageViewController, animated: Bool) {

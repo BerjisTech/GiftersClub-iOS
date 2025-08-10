@@ -60,7 +60,7 @@ extension Notification.Name {
 // MARK: - Placeholder Tab Views
 
 // HomeView implemented in Feed/FeedView.swift
-struct ExploreView: View { var body: some View { Text("Explore").frame(maxWidth: .infinity, maxHeight: .infinity) } }
+// ExploreView implemented in Explore/ExploreView.swift
 struct ChatListView: View { var body: some View { Text("Chats").frame(maxWidth: .infinity, maxHeight: .infinity) } }
 
 struct WishlistsView: View {
