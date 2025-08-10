@@ -4,34 +4,34 @@ struct MainTabView: View {
     @Binding var deepLink: DeepLink?
     @State private var selected: Int = 0
     @State private var programmaticSelectProfile = false
+    @State private var rootTab: RootTab = .home
+    @State private var showComposer = false
 
     var body: some View {
-        TabView(selection: $selected) {
-            HomeView()
-                .tabItem { Label("Home", systemImage: "house.fill") }
-                .tag(0)
-            ExploreView()
-                .tabItem { Label("Explore", systemImage: "safari.fill") }
-                .tag(1)
-            ChatListView()
-                .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
-                .tag(2)
-            WishlistsView()
-                .tabItem { Label("Wishlists", systemImage: "gift.fill") }
-                .tag(3)
-            ProfileView()
-                .tabItem { Label("Profile", systemImage: "person.crop.circle.fill") }
-                .tag(4)
+        VStack(spacing: 0) {
+            ZStack {
+                switch rootTab {
+                case .home: HomeTabsView()
+                case .explore: ExploreView()
+                case .chat: ChatListView()
+                case .profile: ProfileView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(edges: .bottom)
+
+            CustomBottomBar(selected: $rootTab, onCompose: { showComposer = true })
         }
+        .sheet(isPresented: $showComposer) { CreatePostSheet() }
         .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { _ in
             programmaticSelectProfile = true
-            selected = 4
+            rootTab = .profile
         }
-        .onChange(of: selected) { _, newValue in
-            if newValue == 4 && programmaticSelectProfile == false {
+        .onChange(of: rootTab) { _, newValue in
+            if newValue == .profile && programmaticSelectProfile == false {
                 NotificationCenter.default.post(name: .showCurrentProfile, object: nil)
             }
-            if newValue != 4 { programmaticSelectProfile = false }
+            if newValue != .profile { programmaticSelectProfile = false }
         }
         .onChange(of: deepLink) { _, link in
             guard let link else { return }
@@ -43,15 +43,11 @@ struct MainTabView: View {
 
     private func route(_ link: DeepLink) {
         switch link {
-        case .wishlist(let id):
-            selected = 3
-            // Present wishlist detail over Wishlists tab
-            NotificationCenter.default.post(
-                name: .showWishlistDetail,
-                object: id
-            )
+        case .wishlist(_):
+            rootTab = .home
+            NotificationCenter.default.post(name: .showHomeWishlists, object: nil)
         case .gifter(let username):
-            selected = 4
+            rootTab = .profile
             NotificationCenter.default.post(
                 name: .showGifterProfile,
                 object: username
@@ -64,6 +60,7 @@ extension Notification.Name {
     static let showWishlistDetail = Notification.Name("showWishlistDetail")
     static let showGifterProfile = Notification.Name("showGifterProfile")
     static let showCurrentProfile = Notification.Name("showCurrentProfile")
+    static let showHomeWishlists = Notification.Name("showHomeWishlists")
 }
 
 // MARK: - Placeholder Tab Views
@@ -72,27 +69,7 @@ extension Notification.Name {
 // ExploreView implemented in Explore/ExploreView.swift
 // ChatListView implemented in Views/Chat/ChatListView.swift
 
-struct WishlistsView: View {
-    @State private var showDetail = false
-    @State private var wishlistId: String? = nil
-    var body: some View {
-        NavigationStack {
-            List {
-                Text("Your wishlists will appear here")
-            }
-            .navigationTitle("Wishlists")
-            .navigationDestination(isPresented: $showDetail) {
-                WishlistDetailView(wishlistId: wishlistId ?? "")
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .showWishlistDetail)) { note in
-                if let id = note.object as? String {
-                    wishlistId = id
-                    showDetail = true
-                }
-            }
-        }
-    }
-}
+// Old standalone wishlists tab removed; wishlists now live under Home top tabs
 
 struct ProfileView: View {
     @State private var showGifter = false

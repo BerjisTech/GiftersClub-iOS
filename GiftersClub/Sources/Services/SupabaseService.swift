@@ -102,6 +102,20 @@ final class SupabaseManager: ObservableObject {
     struct DBPostMedia: Decodable { let post_id: String; let url: String; let order: Int? }
     struct DBWishlist: Decodable { let id: String; let title: String? }
     struct DBGift: Decodable { let id: String; let name: String?; let tokens: Int?; let image: String? }
+    struct DBTopGifter: Decodable {
+        let user_id: String
+        let username: String
+        let image: String?
+        let gifts_sent: Int?
+        let tokens_sent: Int?
+        let gifter_level: Int?
+        let gifter_level_name: String?
+        let largest_gift_name: String?
+        let largest_gift_id: String?
+        let largest_gift_color: String?
+        let largest_gift_tokens: Int?
+        let badge: String?
+    }
     struct DBAttachment: Decodable { let url: String?; let type: String? }
     struct DBMessage: Decodable { let id: String; let sender_id: String; let receiver_id: String; let content: String; let created_at: String; let attachments: [DBAttachment]? }
     struct DBNotification: Decodable { let id: String; let user_id: String; let type: String; let reference_id: String?; let message: String; let is_read: Bool; let created_at: String; let updated_at: String?; let sender_id: String? }
@@ -583,6 +597,17 @@ final class SupabaseManager: ObservableObject {
             .limit(1)
             .execute()
         return res.value.first?.user_id
+    }
+
+    // MARK: - Leaderboard
+    func fetchTopGifters(limit: Int = 100) async throws -> [DBTopGifter] {
+        let res: PostgrestResponse<[DBTopGifter]> = try await client
+            .from("top_gifters")
+            .select("*")
+            .order("tokens_sent", ascending: false)
+            .limit(limit)
+            .execute()
+        return res.value
     }
 
     // MARK: - Moderation (Filtered words)

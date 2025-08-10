@@ -210,3 +210,10 @@ QA Checklist (iOS)
 - Reduce Motion: verify cross-fades replacing transitions and gradient animations.
 - Backgrounding uploads and action reconciliations while user navigates elsewhere.
 - Video autoplay policy: respects Low Power Mode and Reduce Motion.
+
+
+
+Screen arangement
+
+In main/home
+ 

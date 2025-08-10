@@ -18,7 +18,7 @@ struct ChatListView: View {
                             GroupRow(icon: "person.2.fill", title: "Followers", subtitle: followersSubtitle)
                         }
                         NavigationLink { ActivityNotificationsView() } label: {
-                            GroupRow(icon: "sparkles.square.fill", title: "Activity", subtitle: activitySubtitle)
+                        GroupRow(icon: "sparkles", title: "Activity", subtitle: activitySubtitle)
                         }
                         NavigationLink { SystemNotificationsView() } label: {
                             GroupRow(icon: "exclamationmark.bubble.fill", title: "System", subtitle: systemSubtitle)

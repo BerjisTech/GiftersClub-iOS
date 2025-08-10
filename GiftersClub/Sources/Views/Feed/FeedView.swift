@@ -39,7 +39,7 @@ struct HomeView: View {
             .frame(width: size.width, height: fullHeight)
             .background(Color.black.ignoresSafeArea())
             .ignoresSafeArea(edges: [.top, .bottom])
-            .background(TabBarHeightReader { h in tabBarHeight = h })
+            // Custom bottom bar is separate now; no need to offset by system tab bar height
         }
         .task { await initialLoad() }
         .refreshable { await refresh() }
@@ -260,7 +260,7 @@ private struct PostPageView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.horizontal, 12)
-            .padding(.bottom, bottomSafeInset + tabBarHeight)
+            .padding(.bottom, 0)
         }
         .allowsHitTesting(true)
     }
