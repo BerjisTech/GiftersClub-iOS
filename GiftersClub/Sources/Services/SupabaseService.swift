@@ -185,10 +185,11 @@ final class SupabaseManager: ObservableObject {
 
     func fetchTrendingSearches(limit: Int = 8, windowDays: Int = 30) async throws -> [String] {
         // Prefer server-side grouping via RPC if available
-        struct TrendingRow: Decodable { let query: String; let count: Int? }
+        struct TrendingRow: Decodable { let query: String; let total_count: Int? }
+        struct TrendingParams: Encodable { let timeframe: String; let _limit: Int }
         do {
             let res: PostgrestResponse<[TrendingRow]> = try await client
-                .rpc("search_trending", params: ["limit": limit, "window_days": windowDays])
+                .rpc("get_trending_searches", params: TrendingParams(timeframe: "\(windowDays)d", _limit: limit))
                 .execute()
             let qs = res.value.map { $0.query }
             if !qs.isEmpty { return qs }

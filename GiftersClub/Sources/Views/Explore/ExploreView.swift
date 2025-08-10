@@ -29,10 +29,25 @@ struct ExploreView: View {
             .navigationTitle("Explore")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $selectedPost) { post in
-                ExplorePostDetailView(post: post)
+                let media: PostViewerModel.Media = {
+                    if let first = post.media?.first, let u = first.url, let url = URL(string: u) {
+                        if first.media_type == "video" { return .video(url) }
+                        return .image(url)
+                    }
+                    return .images([])
+                }()
+                PostViewer(model: .init(
+                    id: post.id,
+                    authorUsername: post.profile?.username ?? "",
+                    authorName: post.profile?.name,
+                    authorAvatar: post.profile?.image.flatMap(URL.init(string:)),
+                    caption: post.content ?? "",
+                    media: media
+                ))
             }
             .navigationDestination(item: $selectedUser) { user in
-                GifterProfileView(username: user.username)
+                // Avoid nested stacks: push the profile detail directly
+                ProfileDetailView(username: user.username)
             }
             .task { await loadSuggestions() }
         }
@@ -195,9 +210,14 @@ private struct ExplorePostCard: View {
         ZStack(alignment: .bottomLeading) {
             if let media = post.media, let first = media.first {
                 if first.media_type == "photo", let u = first.url, let url = URL(string: u) {
-                    AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { Color(.secondarySystemBackground) }
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    GeometryReader { geo in
+                        AsyncImage(url: url) { img in
+                            img.resizable().scaledToFill()
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                        } placeholder: { Color(.secondarySystemBackground) }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else if first.media_type == "video", let u = first.url, let url = URL(string: u) {
                     VideoThumbnail(url: url)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -244,28 +264,69 @@ private struct ExploreTopGrid: View {
     let users: [SupabaseManager.ExploreUser]
     var onSelectPost: (SupabaseManager.ExplorePost) -> Void = { _ in }
     var onSelectUser: (SupabaseManager.ExploreUser) -> Void = { _ in }
-    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: 10) {
-                // Users as full-width pills
-                ForEach(users, id: \.user_id) { u in
-                    ExploreUserPill(user: u)
-                        .gridCellColumns(2)
-                        .onTapGesture { onSelectUser(u) }
-                }
-                // Posts as cards
-                ForEach(posts, id: \.id) { p in
-                    ExplorePostCard(post: p)
-                        .frame(height: 200)
-                        .contentShape(Rectangle())
-                        .onTapGesture { onSelectPost(p) }
+            LazyVStack(spacing: 10) {
+                ForEach(buildTopEntries(posts: posts, users: users)) { entry in
+                    if let pair = entry.posts {
+                        HStack(spacing: 10) {
+                            ExplorePostCard(post: pair[0])
+                                .frame(height: 200)
+                                .contentShape(Rectangle())
+                                .onTapGesture { onSelectPost(pair[0]) }
+                            if pair.count > 1 {
+                                ExplorePostCard(post: pair[1])
+                                    .frame(height: 200)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { onSelectPost(pair[1]) }
+                            } else {
+                                Color.clear.frame(height: 200)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    if let u = entry.user {
+                        ExploreUserPill(user: u)
+                            .padding(.horizontal)
+                            .onTapGesture { onSelectUser(u) }
+                        Divider().padding(.horizontal)
+                    }
                 }
             }
-            .padding(.horizontal)
             .padding(.top, 8)
         }
     }
+}
+
+private struct TopEntry: Identifiable {
+    let id: String
+    let posts: [SupabaseManager.ExplorePost]?
+    let user: SupabaseManager.ExploreUser?
+}
+
+private func buildTopEntries(posts: [SupabaseManager.ExplorePost], users: [SupabaseManager.ExploreUser]) -> [TopEntry] {
+    let pairs: [[SupabaseManager.ExplorePost]] = stride(from: 0, to: posts.count, by: 2).map { i in
+        var arr: [SupabaseManager.ExplorePost] = []
+        arr.append(posts[i])
+        if i + 1 < posts.count { arr.append(posts[i+1]) }
+        return arr
+    }
+    var entries: [TopEntry] = []
+    var uIndex = 0
+    for (idx, pair) in pairs.enumerated() {
+        let rowId = pair.map { $0.id }.joined(separator: ",")
+        entries.append(TopEntry(id: "row:\(rowId)", posts: pair, user: nil))
+        if (idx + 1) % 2 == 0, uIndex < users.count {
+            let u = users[uIndex]
+            entries.append(TopEntry(id: "user:\(u.user_id)", posts: nil, user: u))
+            uIndex += 1
+        }
+    }
+    if users.count > 0 && pairs.isEmpty {
+        let u = users[0]
+        entries.append(TopEntry(id: "user:\(u.user_id)", posts: nil, user: u))
+    }
+    return entries
 }
 
 private struct ExploreUserPill: View {
@@ -315,33 +376,4 @@ private struct VideoThumbnail: View {
 }
 
 // Removed local storage; using DB-backed suggestions
-// MARK: - Post detail
-private struct ExplorePostDetailView: View {
-    let post: SupabaseManager.ExplorePost
-    var body: some View {
-        ScrollView { VStack(spacing: 12) {
-            if let media = post.media, let first = media.first, let u = first.url, let url = URL(string: u) {
-                if first.media_type == "photo" {
-                    AsyncImage(url: url) { img in img.resizable().scaledToFit() } placeholder: { ProgressView() }
-                        .frame(maxWidth: .infinity)
-                } else if first.media_type == "video" {
-                    VideoThumbnail(url: url).frame(height: 240).overlay(alignment: .center) { Image(systemName: "play.circle.fill").font(.system(size: 48)).foregroundStyle(.white) }
-                }
-            }
-            if let prof = post.profile {
-                HStack(spacing: 10) {
-                    if let img = prof.image, let url = URL(string: img) {
-                        AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color(.systemGray4) }
-                            .frame(width: 36, height: 36).clipShape(Circle())
-                    } else { Circle().fill(Color(.systemGray4)).frame(width: 36, height: 36) }
-                    Text(prof.name ?? prof.username ?? "").font(.headline)
-                    Spacer()
-                }.padding(.horizontal)
-            }
-            if let c = post.content, !c.isEmpty { Text(c).font(.body).padding(.horizontal) }
-            Spacer(minLength: 0)
-        }}
-        .navigationTitle("Post")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
+// Reused Home-like viewer is now used for post detail
