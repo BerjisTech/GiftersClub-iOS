@@ -71,23 +71,43 @@ struct PostViewer: View {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        if let a = model.authorAvatar { AsyncImage(url: a) { $0.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) } .frame(width: 28, height: 28).clipShape(Circle()) }
-                        Text(model.authorName ?? "@\(model.authorUsername)").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                        if let a = model.authorAvatar {
+                            AsyncImage(url: a) { $0.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                                .frame(width: 28, height: 28)
+                                .clipShape(Circle())
+                        }
+                        Text(model.authorName ?? "@\(model.authorUsername)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        NotificationCenter.default.post(name: .showGifterProfile, object: model.authorUsername)
                     }
                     if !model.caption.isEmpty {
-                        Text(model.caption).font(.footnote).foregroundStyle(.white).lineLimit(3)
+                        Text(model.caption)
+                            .font(.footnote)
+                            .foregroundStyle(.white)
+                            .lineLimit(3)
                     }
                 }
                 Spacer()
                 VStack(spacing: 18) {
-                    Image(systemName: "heart").foregroundStyle(.white).font(.title2.weight(.semibold)).onTapGesture { like() }
-                    Image(systemName: "arrowshape.turn.up.forward.fill").foregroundStyle(.white).font(.title2.weight(.semibold))
-                    Image(systemName: "message.fill").foregroundStyle(.white).font(.title2.weight(.semibold))
+                    Image(systemName: "heart")
+                        .foregroundStyle(.white)
+                        .font(.title2.weight(.semibold))
+                        .onTapGesture { like() }
+                    Image(systemName: "arrowshape.turn.up.forward.fill")
+                        .foregroundStyle(.white)
+                        .font(.title2.weight(.semibold))
+                    Image(systemName: "message.fill")
+                        .foregroundStyle(.white)
+                        .font(.title2.weight(.semibold))
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 24)
-        }.ignoresSafeArea()
+            .padding(.bottom, 24 + CustomBottomBar.barHeight)
+        }
     }
 
     private var doubleTap: some Gesture { TapGesture(count: 2).onEnded { like() } }
