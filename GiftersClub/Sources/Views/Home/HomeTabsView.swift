@@ -4,7 +4,7 @@ enum HomeTopTab: String, CaseIterable { case posts = "Posts", gifts = "Gifts", g
 
 struct HomeTabsView: View {
     @State private var tab: HomeTopTab = .posts
-    private let tabsHeight: CGFloat = 50
+    private let tabsHeight: CGFloat = 20
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -25,7 +25,7 @@ struct HomeTabsView: View {
 
             // Floating top tabs (no background)
             VStack(spacing: 0) {
-                TopTabsBar(tab: $tab)
+                TopTabsBar(tab: $tab, onDark: tab == .posts)
                     .frame(height: tabsHeight)
                     .padding(.horizontal)
             }
@@ -93,6 +93,7 @@ private struct GiftsGridView: View {
 // MARK: - Custom top tabs bar
 private struct TopTabsBar: View {
     @Binding var tab: HomeTopTab
+    var onDark: Bool = false
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
@@ -104,7 +105,7 @@ private struct TopTabsBar: View {
                         Button(action: { withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { tab = t } }) {
                             Text(t.rawValue)
                                 .font(.subheadline.weight(tab == t ? .semibold : .regular))
-                                .foregroundStyle(tab == t ? Color.primary : .secondary)
+                                .foregroundStyle(onDark ? (tab == t ? Color.white : Color.white.opacity(0.7)) : (tab == t ? Color.primary : .secondary))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 30)
                         }

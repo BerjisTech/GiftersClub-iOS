@@ -31,7 +31,7 @@ struct HomeView: View {
     var body: some View {
         GeometryReader { proxy in
             let size = proxy.size
-            let fullHeight = size.height + proxy.safeAreaInsets.bottom
+            let fullHeight = size.height
             VerticalPageView(items: posts, selection: $selection) { idx, _ in
                 PostPageView(post: $posts[idx], isActive: selection == idx, bottomSafeInset: proxy.safeAreaInsets.bottom, tabBarHeight: tabBarHeight)
                     .frame(width: size.width, height: fullHeight)
