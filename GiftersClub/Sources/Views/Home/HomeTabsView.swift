@@ -12,7 +12,7 @@ struct HomeTabsView: View {
             Group {
                 switch tab {
                 case .posts:
-                    HomeView()
+                    HomeView() // posts fills from top of parent; tabs float above
                 case .gifts:
                     GiftsHomeView().padding(.top, tabsHeight)
                 case .gifters:

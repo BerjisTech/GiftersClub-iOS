@@ -8,7 +8,8 @@ struct MainTabView: View {
     @State private var showComposer = false
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
+            // Fullscreen content behind the bottom bar
             ZStack {
                 switch rootTab {
                 case .home: HomeTabsView()
@@ -18,8 +19,9 @@ struct MainTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea(edges: .bottom)
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: CustomBottomBar.barHeight) }
 
+            // Bottom menu overlays content with equal spacing
             CustomBottomBar(selected: $rootTab, onCompose: { showComposer = true })
         }
         .sheet(isPresented: $showComposer) { CreatePostSheet() }

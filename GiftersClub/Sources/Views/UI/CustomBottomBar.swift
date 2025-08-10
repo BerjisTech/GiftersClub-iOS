@@ -3,9 +3,9 @@ import SwiftUI
 enum RootTab { case home, explore, chat, profile }
 
 struct CustomBottomBar: View {
+    static let barHeight: CGFloat = 70
     @Binding var selected: RootTab
     var onCompose: () -> Void
-    private let height: CGFloat = 70
 
     var body: some View {
         ZStack {
@@ -25,7 +25,7 @@ struct CustomBottomBar: View {
             }
             .padding(.horizontal, 24)
         }
-        .frame(height: height)
+        .frame(height: Self.barHeight)
     }
 
     private func barItem(icon: String, tab: RootTab) -> some View {
@@ -51,4 +51,3 @@ struct CustomBottomBar: View {
         .offset(y: -10)
     }
 }
-

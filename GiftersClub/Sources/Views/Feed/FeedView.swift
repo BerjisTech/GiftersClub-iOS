@@ -37,8 +37,8 @@ struct HomeView: View {
                     .frame(width: size.width, height: fullHeight)
             }
             .frame(width: size.width, height: fullHeight)
-            .background(Color.black.ignoresSafeArea())
-            .ignoresSafeArea(edges: [.top, .bottom])
+            .background(Color.black)
+            .ignoresSafeArea(edges: [.bottom])
             // Custom bottom bar is separate now; no need to offset by system tab bar height
         }
         .task { await initialLoad() }
