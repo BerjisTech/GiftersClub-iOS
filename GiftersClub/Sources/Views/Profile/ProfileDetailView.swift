@@ -59,6 +59,7 @@ struct ProfileDetailView: View {
             }
             .navigationTitle("")
             .toolbarTitleDisplayMode(.inline)
+            .loadingOverlay(isLoading)
             .task(id: loadKey) {
                 if !hasLoadedOnce {
                     await loadAll()

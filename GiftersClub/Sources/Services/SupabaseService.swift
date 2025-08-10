@@ -106,6 +106,54 @@ final class SupabaseManager: ObservableObject {
     struct DBFilteredWord: Decodable { let word: String }
     struct CountRow: Decodable { let id: String }
 
+    // MARK: - Feed RPC DTOs
+    struct FeedRPCProfile: Decodable { let id: String?; let user_id: String?; let username: String?; let image: String? }
+    struct FeedRPCMedia: Decodable { let id: String?; let media_type: String?; let url: String?; let order: Int?; let created_at: String? }
+    struct FeedRPCRow: Decodable {
+        let id: String
+        let user_id: String
+        let content: String?
+        let created_at: String?
+        let like_count: Int?
+        let comment_count: Int?
+        let share_count: Int?
+        let profile: FeedRPCProfile?
+        let media: [FeedRPCMedia]?
+    }
+
+    func fetchFeed(limit: Int = 10, offset: Int = 0) async throws -> [FeedRPCRow] {
+        let me = user?.id.uuidString
+        struct Params: Encodable { let _user_id: String?; let _limit: Int; let _offset: Int }
+        let params = Params(_user_id: me, _limit: limit, _offset: offset)
+        let res: PostgrestResponse<[FeedRPCRow]> = try await client
+            .rpc("get_feed_posts", params: params)
+            .execute()
+        return res.value
+    }
+
+    // MARK: - Comments
+    struct DBCommentRow: Decodable {
+        let id: String
+        let post_id: String
+        let user_id: String
+        let content: String
+        let created_at: String?
+        let profile: DBProfile?
+    }
+
+    func fetchComments(postId: String, limit: Int = 50, offset: Int = 0) async throws -> [DBCommentRow] {
+        // Attempt to embed profile fields from profiles table (PostgREST embedded resource)
+        let select = "id,post_id,user_id,content,created_at,profile:profiles(user_id,username,image)"
+        let res: PostgrestResponse<[DBCommentRow]> = try await client
+            .from("comments")
+            .select(select)
+            .eq("post_id", value: postId)
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+        return res.value
+    }
+
     // MARK: - Profile Fetch
     func fetchProfile(username: String?, userId: String?) async throws -> DBProfile? {
         if let u = username {

@@ -9,7 +9,7 @@ struct GiftersClubApp: App {
         WindowGroup {
             Group {
                 if supabase.isLoading {
-                    ProgressView().progressViewStyle(.circular)
+                    LoadingOverlay(isPresented: true)
                 } else if supabase.user == nil {
                     AuthView()
                 } else {
@@ -28,4 +28,3 @@ struct GiftersClubApp: App {
         }
     }
 }
-
