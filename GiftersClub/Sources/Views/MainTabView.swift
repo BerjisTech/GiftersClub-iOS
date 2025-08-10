@@ -6,6 +6,7 @@ struct MainTabView: View {
     @State private var programmaticSelectProfile = false
     @State private var rootTab: RootTab = .home
     @State private var showComposer = false
+    @State private var profileRouteUsername: String? = nil
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -15,7 +16,7 @@ struct MainTabView: View {
                 case .home: HomeTabsView()
                 case .explore: ExploreView()
                 case .chat: ChatListView()
-                case .profile: ProfileView()
+                case .profile: ProfileView(routeUsername: $profileRouteUsername)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -25,8 +26,9 @@ struct MainTabView: View {
             CustomBottomBar(selected: $rootTab, onCompose: { showComposer = true })
         }
         .sheet(isPresented: $showComposer) { CreatePostSheet() }
-        .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
             programmaticSelectProfile = true
+            if let u = note.object as? String { profileRouteUsername = u }
             rootTab = .profile
         }
         .onChange(of: rootTab) { _, newValue in
@@ -74,6 +76,7 @@ extension Notification.Name {
 // Old standalone wishlists tab removed; wishlists now live under Home top tabs
 
 struct ProfileView: View {
+    @Binding var routeUsername: String?
     @State private var showGifter = false
     @State private var username: String? = nil
     @StateObject private var banners = BannerQueue()
@@ -93,6 +96,12 @@ struct ProfileView: View {
             }
         }
         .environmentObject(drawer)
+        .onChange(of: routeUsername) { _, newValue in
+            if let u = newValue { username = u; showGifter = true; routeUsername = nil }
+        }
+        .onAppear {
+            if let u = routeUsername { username = u; showGifter = true; routeUsername = nil }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
             if let u = note.object as? String { username = u; showGifter = true }
         }

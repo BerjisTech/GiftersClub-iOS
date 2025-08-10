@@ -71,7 +71,7 @@ struct ProfileDetailView: View {
         }
     }
 
-    private var canShowBack: Bool { true }
+    private var canShowBack: Bool { false }
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
@@ -373,8 +373,8 @@ private struct PostsGridView: View {
                     } placeholder: {
                         ShimmerView()
                     }
-                    .frame(height: 140)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(width: 180, height: 280)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
             .padding(.vertical, 8)

@@ -27,10 +27,15 @@ struct CommentsSheet: View {
             List {
                 ForEach(comments, id: \.id) { c in
                     HStack(alignment: .top, spacing: 10) {
-                        Circle().fill(Color.secondary.opacity(0.3)).frame(width: 28, height: 28)
+                        Circle().fill(Color.secondary.opacity(0.3))
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                            .onTapGesture { if let u = c.profile?.username { NotificationCenter.default.post(name: .showGifterProfile, object: u) } }
                         VStack(alignment: .leading, spacing: 4) {
                             Text(c.profile?.username ?? "user")
                                 .font(.caption.weight(.semibold))
+                                .contentShape(Rectangle())
+                                .onTapGesture { if let u = c.profile?.username { NotificationCenter.default.post(name: .showGifterProfile, object: u) } }
                             Text(c.content)
                                 .font(.subheadline)
                         }
