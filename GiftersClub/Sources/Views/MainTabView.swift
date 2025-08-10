@@ -22,6 +22,9 @@ struct MainTabView: View {
                 .tabItem { Label("Profile", systemImage: "person.crop.circle.fill") }
                 .tag(4)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
+            selected = 4
+        }
         .onChange(of: deepLink) { _, link in
             guard let link else { return }
             route(link)
@@ -91,12 +94,20 @@ struct ProfileView: View {
     var body: some View {
         DrawerHost {
             ZStack(alignment: .top) {
-                NavigationStack { ProfileDetailView(username: nil, userId: nil) }
+                NavigationStack {
+                    ProfileDetailView(username: nil, userId: nil)
+                        .navigationDestination(isPresented: $showGifter) {
+                            if let u = username { GifterProfileView(username: u) }
+                        }
+                }
                 .environmentObject(banners)
                 BannerHost().environmentObject(banners)
             }
         }
         .environmentObject(drawer)
+        .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
+            if let u = note.object as? String { username = u; showGifter = true }
+        }
     }
 }
 

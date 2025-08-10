@@ -154,6 +154,38 @@ final class SupabaseManager: ObservableObject {
         return res.value
     }
 
+    struct InsertComment: Encodable { let post_id: String; let user_id: String; let content: String }
+    func addComment(postId: String, content: String) async throws -> DBCommentRow? {
+        guard let me = user?.id.uuidString else { return nil }
+        let payload = InsertComment(post_id: postId, user_id: me, content: content)
+        let res: PostgrestResponse<[DBCommentRow]> = try await client
+            .from("comments")
+            .insert([payload])
+            .select("id,post_id,user_id,content,created_at,profile:profiles(user_id,username,image)")
+            .execute()
+        return res.value.first
+    }
+
+    // MARK: - Likes
+    struct ReactionInsert: Encodable { let post_id: String; let user_id: String; let type: String }
+    func setLike(postId: String, like: Bool) async throws {
+        guard let me = user?.id.uuidString else { return }
+        if like {
+            _ = try await client
+                .from("post_reactions")
+                .insert([ReactionInsert(post_id: postId, user_id: me, type: "like")])
+                .execute()
+        } else {
+            _ = try await client
+                .from("post_reactions")
+                .delete()
+                .eq("post_id", value: postId)
+                .eq("user_id", value: me)
+                .eq("type", value: "like")
+                .execute()
+        }
+    }
+
     // MARK: - Profile Fetch
     func fetchProfile(username: String?, userId: String?) async throws -> DBProfile? {
         if let u = username {

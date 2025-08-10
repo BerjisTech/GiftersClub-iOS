@@ -69,15 +69,19 @@ struct CommentsSheet: View {
     }
 
     private func send() async {
-        // TODO: Implement send comment via Supabase (insert into comments)
-        // For now, optimistic append locally
         let trimmed = newComment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let temp = SupabaseManager.DBCommentRow(id: UUID().uuidString, post_id: postId, user_id: SupabaseManager.shared.user?.id.uuidString ?? "", content: trimmed, created_at: nil, profile: nil)
-        await MainActor.run {
-            comments.insert(temp, at: 0)
-            newComment = ""
+        await MainActor.run { isLoading = true }
+        defer { Task { await MainActor.run { isLoading = false } } }
+        do {
+            if let created = try await supabase.addComment(postId: postId, content: trimmed) {
+                await MainActor.run {
+                    comments.insert(created, at: 0)
+                    newComment = ""
+                }
+            }
+        } catch {
+            // keep text in field on failure
         }
     }
 }
-

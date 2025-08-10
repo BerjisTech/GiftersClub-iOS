@@ -22,18 +22,21 @@ struct HomeView: View {
     @State private var isLoading = false
     @State private var offset: Int = 0
     @ObservedObject private var commentsPresenter = CommentsPresenter.shared
+    @State private var tabBarHeight: CGFloat = 0
+    @State private var sharePost: FeedPost? = nil
 
     var body: some View {
         GeometryReader { proxy in
             let size = proxy.size
             let fullHeight = size.height + proxy.safeAreaInsets.bottom
             VerticalPageView(items: posts, selection: $selection) { idx, _ in
-                PostPageView(post: $posts[idx], isActive: selection == idx, bottomSafeInset: proxy.safeAreaInsets.bottom)
+                PostPageView(post: $posts[idx], isActive: selection == idx, bottomSafeInset: proxy.safeAreaInsets.bottom, tabBarHeight: tabBarHeight)
                     .frame(width: size.width, height: fullHeight)
             }
             .frame(width: size.width, height: fullHeight)
             .background(Color.black.ignoresSafeArea())
             .ignoresSafeArea(edges: [.top, .bottom])
+            .background(TabBarHeightReader { h in tabBarHeight = h })
         }
         .task { await initialLoad() }
         .refreshable { await refresh() }
@@ -42,6 +45,13 @@ struct HomeView: View {
             if let id = commentsPresenter.postId {
                 CommentsSheet(postId: id)
             }
+        }
+        .sheet(item: $sharePost) { post in
+            ShareOptionsSheet(url: shareURL(for: post))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("share_post"))) { note in
+            guard let id = note.object as? String, let p = posts.first(where: { $0.id == id }) else { return }
+            sharePost = p
         }
     }
 
@@ -104,6 +114,7 @@ private struct PostPageView: View {
     @Binding var post: FeedPost
     let isActive: Bool
     let bottomSafeInset: CGFloat
+    let tabBarHeight: CGFloat
 
     @State private var magnify: CGFloat = 1.0
     @State private var isPaused: Bool = false
@@ -118,7 +129,8 @@ private struct PostPageView: View {
                 .scaleEffect(isPaused ? 1.03 : 1.0)
                 .animation(.easeInOut(duration: 0.2), value: isPaused)
                 .scaleEffect(magnify)
-                .allowsHitTesting(false)
+                .gesture(singleTap)
+                .simultaneousGesture(magnifyGesture)
 
             if showHeart {
                 Image(systemName: "heart.fill")
@@ -134,8 +146,6 @@ private struct PostPageView: View {
             if !overlaysHidden { overlays }
         }
         .simultaneousGesture(doubleTap)
-        .simultaneousGesture(singleTap)
-        .simultaneousGesture(magnifyGesture)
         .onChange(of: isActive) { _, active in
             if !active { isPaused = false; magnify = 1.0 }
         }
@@ -169,6 +179,8 @@ private struct PostPageView: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                     }
+                    .onTapGesture { NotificationCenter.default.post(name: .showGifterProfile, object: post.author.username) }
+                    .onTapGesture { openPoster() }
                     VStack(alignment: .leading, spacing: 4) {
                         Text(post.caption)
                             .font(.footnote)
@@ -208,7 +220,7 @@ private struct PostPageView: View {
                             .font(.title2.weight(.semibold))
                         Text("\(post.shares)").foregroundStyle(.white).font(.caption2)
                     }
-                    .onTapGesture { /* TODO: share */ }
+                    .onTapGesture { share() }
 
                     VStack(spacing: 4) {
                         Image(systemName: "message.fill")
@@ -222,7 +234,7 @@ private struct PostPageView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.horizontal, 12)
-            .padding(.bottom, bottomSafeInset)
+            .padding(.bottom, bottomSafeInset + tabBarHeight)
         }
         .allowsHitTesting(true)
     }
@@ -257,9 +269,18 @@ private struct PostPageView: View {
     private func toggleLike(showBurst: Bool = false) {
         post.isLiked.toggle()
         post.likes += post.isLiked ? 1 : -1
+        Task { try? await SupabaseManager.shared.setLike(postId: post.id, like: post.isLiked) }
         guard showBurst else { return }
         showHeart = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { withAnimation(.easeOut(duration: 0.2)) { showHeart = false } }
+    }
+
+    private func share() {
+        NotificationCenter.default.post(name: .init("share_post"), object: post.id)
+    }
+
+    private func openPoster() {
+        NotificationCenter.default.post(name: .showGifterProfile, object: post.author.username)
     }
 }
 
@@ -443,5 +464,30 @@ private func extractHashtags(_ text: String) -> [String] {
     return matches.compactMap { m in
         guard m.numberOfRanges > 1 else { return nil }
         return ns.substring(with: m.range(at: 1))
+    }
+}
+    private func shareURL(for post: FeedPost) -> URL {
+        // TODO: Build actual deep link for a post
+        return URL(string: "https://gifter.club/posts/\(post.id)")!
+    }
+
+// MARK: - Tab bar height introspection
+private struct TabBarHeightReader: UIViewRepresentable {
+    var onUpdate: (CGFloat) -> Void
+    func makeUIView(context: Context) -> UIView { Probe(onUpdate: onUpdate) }
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    private final class Probe: UIView {
+        var onUpdate: (CGFloat) -> Void
+        init(onUpdate: @escaping (CGFloat) -> Void) { self.onUpdate = onUpdate; super.init(frame: .zero); backgroundColor = .clear }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func didMoveToWindow() { super.didMoveToWindow(); report() }
+        override func layoutSubviews() { super.layoutSubviews(); report() }
+        private func report() {
+            // Ascend responder chain to find a hosting VC, then its tabBarController
+            var responder: UIResponder? = self
+            while let r = responder { if let vc = r as? UIViewController { if let tb = vc.tabBarController?.tabBar { onUpdate(tb.frame.height); return } }; responder = r.next }
+            onUpdate(0)
+        }
     }
 }
