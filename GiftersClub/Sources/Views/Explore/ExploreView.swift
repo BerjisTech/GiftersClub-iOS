@@ -14,20 +14,32 @@ struct ExploreView: View {
     @FocusState private var focused: Bool
     private let supabase = SupabaseManager.shared
 
+    @State private var searchBarHeight: CGFloat = 56
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                searchBar
-                if showSuggestions {
-                    suggestionsView
-                } else {
-                    tabsBar
-                    Divider()
-                    resultsView
+            ZStack(alignment: .top) {
+                VStack(spacing: 0) {
+                    if showSuggestions {
+                        suggestionsView
+                    } else {
+                        tabsBar
+                        Divider()
+                        resultsView
+                    }
                 }
+                .padding(.top, searchBarHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                // Pinned search bar overlay measured for exact height (prevents jump and gaps)
+                searchBar
+                    .background(.ultraThinMaterial)
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(key: SearchBarHeightKey.self, value: geo.size.height)
+                    })
             }
-            .navigationTitle("Explore")
-            .navigationBarTitleDisplayMode(.inline)
+            .onPreferenceChange(SearchBarHeightKey.self) { searchBarHeight = $0 }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .navigationBarHidden(true)
             .navigationDestination(item: $selectedPost) { post in
                 let media: PostViewerModel.Media = {
                     if let first = post.media?.first, let u = first.url, let url = URL(string: u) {
@@ -53,6 +65,11 @@ struct ExploreView: View {
         }
     }
 
+private struct SearchBarHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 56
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
     private var searchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -61,7 +78,9 @@ struct ExploreView: View {
                 .disableAutocorrection(true)
                 .focused($focused)
                 .onChange(of: query) { _, new in debounceSearch(new) }
-            if !query.isEmpty {
+            if isSearching && !query.isEmpty {
+                ProgressView().progressViewStyle(.circular)
+            } else if !query.isEmpty {
                 Button(action: { query = ""; results = nil }) { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
             }
         }
@@ -122,9 +141,7 @@ struct ExploreView: View {
 
     private var resultsView: some View {
         Group {
-            if isSearching {
-                ProgressView().padding(.top, 20)
-            } else if let r = results {
+            if let r = results {
                 switch activeTab {
                 case .top:
                     ExploreTopGrid(posts: r.top, users: r.users) { p in selectedPost = p } onSelectUser: { u in selectedUser = u }
@@ -136,7 +153,12 @@ struct ExploreView: View {
                     ExploreUsersList(users: r.users) { u in selectedUser = u }
                 }
             } else {
-                VStack(spacing: 8) { Text("Search for posts and people").foregroundStyle(.secondary) }.padding(.top, 24)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Search for posts and people").foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal)
+                .padding(.top, 24)
             }
         }
     }
@@ -219,9 +241,13 @@ private struct ExplorePostCard: View {
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else if first.media_type == "video", let u = first.url, let url = URL(string: u) {
-                    VideoThumbnail(url: url)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(alignment: .center) { Image(systemName: "play.circle.fill").font(.system(size: 36)).foregroundStyle(.white) }
+                    GeometryReader { geo in
+                        VideoThumbnail(url: url)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(alignment: .center) { Image(systemName: "play.circle.fill").font(.system(size: 36)).foregroundStyle(.white) }
                 } else { Color(.secondarySystemBackground).clipShape(RoundedRectangle(cornerRadius: 12)) }
             } else { Color(.secondarySystemBackground).clipShape(RoundedRectangle(cornerRadius: 12)) }
             if let prof = post.profile { Text(prof.username ?? "").font(.caption).foregroundStyle(.white).padding(6) }
@@ -354,12 +380,20 @@ private struct VideoThumbnail: View {
     let url: URL
     @State private var image: UIImage? = nil
     var body: some View {
-        ZStack {
-            if let img = image { Image(uiImage: img).resizable().scaledToFill() }
-            else { Color.black.opacity(0.8) }
+        GeometryReader { geo in
+            ZStack {
+                if let img = image {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                } else {
+                    Color.black.opacity(0.8)
+                }
+            }
         }
         .task { await generate() }
-        .clipped()
     }
     private func generate() async {
         let asset = AVURLAsset(url: url)

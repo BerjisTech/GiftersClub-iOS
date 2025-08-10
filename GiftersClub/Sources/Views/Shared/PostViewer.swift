@@ -62,7 +62,7 @@ struct PostViewer: View {
         switch model.media {
         case .image(let url): ZoomableAsyncImage(url: url)
         case .images(let urls): Carousel(urls: urls)
-        case .video(let url): VideoPlayer(player: AVPlayer(url: url)).ignoresSafeArea()
+        case .video(let url): AutoPlayVideo(url: url, play: !isPaused)
         }
     }
 
@@ -98,6 +98,19 @@ struct PostViewer: View {
     private func like() { if showDislike { showDislike = false }; showLike = true }
 }
 
+private struct AutoPlayVideo: View {
+    let url: URL
+    var play: Bool
+    @State private var player: AVPlayer? = nil
+    var body: some View {
+        VideoPlayer(player: player)
+            .onAppear { if player == nil { player = AVPlayer(url: url) }; if play { player?.play() } }
+            .onChange(of: play) { _, p in if p { player?.play() } else { player?.pause() } }
+            .onDisappear { player?.pause() }
+            .ignoresSafeArea()
+    }
+}
+
 private struct ZoomableAsyncImage: View {
     let url: URL
     var body: some View {
@@ -116,4 +129,3 @@ private struct Carousel: View { let urls: [URL]; @State private var idx = 0
             .ignoresSafeArea()
     }
 }
-
