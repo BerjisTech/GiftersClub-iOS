@@ -162,7 +162,7 @@ struct WishlistsHomeView: View {
                     ForEach(items, id: \.id) { w in
                         NavigationLink(value: w.id) {
                             HStack(spacing: 12) {
-                                if let url = wishlistImageURL(w.image) {
+                                if let url = wishlistImageURL(w.image, fallback: w.profile?.image) {
                                     AsyncImage(url: url) { img in
                                         img.resizable().scaledToFill()
                                     } placeholder: { ShimmerView() }
@@ -203,11 +203,18 @@ struct WishlistsHomeView: View {
         isLoading = true; defer { isLoading = false }
         items = (try? await supabase.fetchAllWishlistsDetailed(limit: 50)) ?? []
     }
-    private func wishlistImageURL(_ src: String?) -> URL? {
-        guard let src, !src.isEmpty else { return nil }
-        if src.lowercased().hasPrefix("http") { return URL(string: src) }
-        let path = src.hasPrefix("/") ? String(src.dropFirst()) : src
-        return SupabaseConfig.webBase.appendingPathComponent(path)
+    private func wishlistImageURL(_ src: String?, fallback: String? = nil) -> URL? {
+        if let s = src, !s.isEmpty {
+            if s.lowercased().hasPrefix("http") { return URL(string: s) }
+            let path = s.hasPrefix("/") ? String(s.dropFirst()) : s
+            return SupabaseConfig.webBase.appendingPathComponent(path)
+        }
+        if let f = fallback, !f.isEmpty {
+            if f.lowercased().hasPrefix("http") { return URL(string: f) }
+            let path = f.hasPrefix("/") ? String(f.dropFirst()) : f
+            return SupabaseConfig.webBase.appendingPathComponent(path)
+        }
+        return nil
     }
 }
 
@@ -217,13 +224,14 @@ struct WishlistDetailView: View {
     @State private var wishlist: SupabaseManager.DBWishlistFull?
     @State private var contributions: [SupabaseManager.DBWishlistContribution] = []
     @State private var contributorProfiles: [SupabaseManager.DBProfile] = []
+    @State private var totalsByContributor: [String: Int] = [:]
     @State private var isLoading = false
     var body: some View {
         ScrollView {
             if isLoading { ProgressView().frame(maxWidth: .infinity) }
             if let w = wishlist {
                 VStack(alignment: .leading, spacing: 12) {
-                    if let url = wishlistImageURL(w.image) {
+                    if let url = wishlistImageURL(w.image, fallback: w.profile?.image) {
                         AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { ShimmerView() }
                             .frame(height: 180)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -243,8 +251,22 @@ struct WishlistDetailView: View {
                     if contributorProfiles.isEmpty { Text("No contributions yet").foregroundStyle(.secondary) }
                     else {
                         ForEach(contributorProfiles, id: \.user_id) { p in
-                            HStack { RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 32, height: 32); Text(p.name ?? p.username).font(.subheadline); Spacer() }
+                            HStack {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.primary.opacity(0.06))
+                                    .frame(width: 32, height: 32)
+                                Text(p.name ?? p.username)
+                                    .font(.subheadline)
+                                Spacer()
+                                Text("\(totalsByContributor[p.user_id] ?? 0)")
+                                    .font(.subheadline.monospacedDigit())
+                                    .foregroundStyle(.primary)
+                            }
                         }
+                    }
+                    if let w = wishlist, let me = supabase.user?.id.uuidString, w.user_id != me {
+                        Divider().padding(.vertical, 4)
+                        ContributeButton(wishlist: w)
                     }
                 }
                 .padding()
@@ -258,14 +280,93 @@ struct WishlistDetailView: View {
         isLoading = true; defer { isLoading = false }
         wishlist = try? await supabase.fetchWishlistById(wishlistId)
         contributions = (try? await supabase.fetchWishlistContributions(wishlistId: wishlistId)) ?? []
+        totalsByContributor = Dictionary(grouping: contributions, by: { $0.contributor_id })
+            .mapValues { list in list.reduce(0) { $0 + $1.tokens } }
         let ids = Array(Set(contributions.map { $0.contributor_id }))
         contributorProfiles = (try? await supabase.fetchProfilesByUserIds(ids)) ?? []
     }
-    private func wishlistImageURL(_ src: String?) -> URL? {
-        guard let src, !src.isEmpty else { return nil }
-        if src.lowercased().hasPrefix("http") { return URL(string: src) }
-        let path = src.hasPrefix("/") ? String(src.dropFirst()) : src
-        return SupabaseConfig.webBase.appendingPathComponent(path)
+    private func wishlistImageURL(_ src: String?, fallback: String? = nil) -> URL? {
+        if let s = src, !s.isEmpty {
+            if s.lowercased().hasPrefix("http") { return URL(string: s) }
+            let path = s.hasPrefix("/") ? String(s.dropFirst()) : s
+            return SupabaseConfig.webBase.appendingPathComponent(path)
+        }
+        if let f = fallback, !f.isEmpty {
+            if f.lowercased().hasPrefix("http") { return URL(string: f) }
+            let path = f.hasPrefix("/") ? String(f.dropFirst()) : f
+            return SupabaseConfig.webBase.appendingPathComponent(path)
+        }
+        return nil
+    }
+}
+
+private struct ContributeButton: View {
+    let wishlist: SupabaseManager.DBWishlistFull
+    @ObservedObject private var supabase = SupabaseManager.shared
+    @State private var showSheet = false
+    var body: some View {
+        Button(action: { showSheet = true }) {
+            HStack {
+                Spacer()
+                Text("Contribute").font(.headline).foregroundStyle(.white)
+                Spacer()
+            }
+            .padding(.vertical, 12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(AppColors.primaryEnd))
+        }
+        .sheet(isPresented: $showSheet) { ContributeSheet(wishlist: wishlist) }
+    }
+}
+
+private struct ContributeSheet: View {
+    let wishlist: SupabaseManager.DBWishlistFull
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var supabase = SupabaseManager.shared
+    @State private var tokensText: String = ""
+    @State private var isSubmitting = false
+    @State private var error: String? = nil
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Contribute tokens") {
+                    TextField("Amount", text: $tokensText).keyboardType(.numberPad)
+                    if let max = wishlist.tokens {
+                        let contributed = (wishlist.wishlist_contributions ?? []).reduce(0) { $0 + $1.tokens }
+                        let remaining = max - contributed
+                        if remaining > 0 { Text("Remaining target: \(remaining)").font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+                if let error { Text(error).foregroundStyle(.red) }
+            }
+            .navigationTitle("Contribute")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: { Task { await submit() } }) {
+                        if isSubmitting { ProgressView() } else { Text("Send") }
+                    }.disabled(isSubmitting)
+                }
+            }
+        }
+    }
+    private func submit() async {
+        guard let me = supabase.user?.id.uuidString else { return }
+        let tokens = Int(tokensText.filter { $0.isNumber }) ?? 0
+        guard tokens > 0 else { error = "Enter a valid amount"; return }
+        isSubmitting = true; defer { isSubmitting = false }
+        do {
+            // Check balance
+            let my = try await supabase.fetchProfile(username: nil, userId: me)
+            let balance = my?.token_balance ?? 0
+            if balance < tokens {
+                error = "Insufficient tokens. Please top up and try again."
+                return
+            }
+            try await supabase.contributeToWishlist(wishlistId: wishlist.id, contributorId: me, tokens: tokens)
+            dismiss()
+        } catch {
+            self.error = "Failed to contribute. Please try again."
+        }
     }
 }
 

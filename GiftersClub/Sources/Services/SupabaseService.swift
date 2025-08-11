@@ -342,6 +342,28 @@ final class SupabaseManager: ObservableObject {
         }
     }
 
+    /// Contribute tokens to a wishlist via Edge Function.
+    func contributeToWishlist(wishlistId: String, contributorId: String, tokens: Int) async throws {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/contribute-wishlist")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload = [
+            "wishlistId": wishlistId,
+            "contributorId": contributorId,
+            "tokens": tokens
+        ] as [String : Any]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
     /// Search users by username, name, or email (case-insensitive), excluding current user.
     func searchProfilesByKeyword(_ keyword: String, limit: Int = 10) async throws -> [DBProfile] {
         let term = "%\(keyword)%"
