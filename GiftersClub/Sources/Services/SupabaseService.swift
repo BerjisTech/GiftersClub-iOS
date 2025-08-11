@@ -97,6 +97,8 @@ final class SupabaseManager: ObservableObject {
         let token_balance: Int?
         let tokens_sent: Int?
         let tokens_received: Int?
+        let gifts_sent: Int?
+        let gifts_received: Int?
     }
 
     struct DBPost: Decodable { let id: String; let user_id: String }
@@ -377,6 +379,88 @@ final class SupabaseManager: ObservableObject {
         let res: PostgrestResponse<[DBProfile]> = try await q
             .order("username", ascending: true)
             .limit(limit)
+            .execute()
+        return res.value
+    }
+
+    // MARK: - Reported users
+    struct DBReportedUserItem: Decodable, Identifiable {
+        // Use stable id from row id to avoid duplicate/unstable identifiers
+        let rec_id: String
+        let reported_user_id: DBReportedUserProfile?
+        let reason: String?
+        let status: String?
+        let created_at: String?
+        var id: String { rec_id }
+        enum CodingKeys: String, CodingKey { case rec_id = "id", reported_user_id, reason, status, created_at }
+    }
+    struct DBReportedUserProfile: Decodable { let user_id: String; let username: String }
+
+    func fetchReportedUsers(limit: Int = 100, offset: Int = 0) async throws -> [DBReportedUserItem] {
+        guard let me = user?.id.uuidString else { return [] }
+        let select = "id,reported_user_id(user_id,username),reason,status,created_at"
+        let res: PostgrestResponse<[DBReportedUserItem]> = try await client
+            .from("user_reports")
+            .select(select)
+            .eq("reporter_user_id", value: me)
+            .order("created_at", ascending: false)
+            .range(from: offset, to: offset + max(0, limit - 1))
+            .execute()
+        return res.value
+    }
+
+    // MARK: - Withdrawals
+    struct DBWithdrawalRequest: Decodable, Identifiable {
+        let id: String
+        let user_id: String
+        let tokens: Int
+        let kes_amount: Int?
+        let target_currency: String
+        let exchange_rate: Double
+        let converted_amount: Double?
+        let status: String
+        let rejection_reason: String?
+        let payment_method: String
+        let payment_details: [String: String]?
+        let processed_by: String?
+        let processed_at: String?
+        let transaction_reference: String?
+        let created_at: String
+        let updated_at: String
+    }
+
+    func fetchWithdrawalsByUser(limit: Int = 100) async throws -> [DBWithdrawalRequest] {
+        guard let me = user?.id.uuidString else { return [] }
+        let res: PostgrestResponse<[DBWithdrawalRequest]> = try await client
+            .from("withdrawals")
+            .select("*")
+            .eq("user_id", value: me)
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+        return res.value
+    }
+
+    func requestWithdrawal(tokens: Int, targetCurrency: String, exchangeRate: Double, paymentMethod: String, paymentDetails: [String: String]?) async throws -> DBWithdrawalRequest? {
+        struct Params: Encodable {
+            let p_user_id: String
+            let p_tokens: Int
+            let p_target_currency: String
+            let p_exchange_rate: Double
+            let p_payment_method: String
+            let p_payment_details: [String: String]?
+        }
+        guard let me = user?.id.uuidString else { return nil }
+        let params = Params(
+            p_user_id: me,
+            p_tokens: tokens,
+            p_target_currency: targetCurrency,
+            p_exchange_rate: exchangeRate,
+            p_payment_method: paymentMethod,
+            p_payment_details: paymentDetails
+        )
+        let res: PostgrestResponse<DBWithdrawalRequest> = try await client
+            .rpc("request_withdrawal", params: params)
             .execute()
         return res.value
     }

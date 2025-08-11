@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var selectedAvatarData: Data?
     @State private var blocked: [SupabaseManager.DBProfile] = []
     @State private var filtered: [String] = []
+    @State private var reported: [SupabaseManager.DBReportedUserItem] = []
     @State private var newFilter: String = ""
     @State private var searchUsername: String = ""
     @State private var suggestions: [SupabaseManager.DBProfile] = []
@@ -167,6 +168,23 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                // Reported users list (read-only)
+                if reported.isEmpty {
+                    Text("You haven't reported anyone.").foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Reported").font(.subheadline).foregroundStyle(.secondary)
+                        ForEach(reported) { item in
+                            HStack {
+                                Text("@\(item.reported_user_id?.username ?? "user")")
+                                Spacer()
+                                Text((item.status ?? "").capitalized).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                }
             }
             .sheet(isPresented: $reportSheetVisible) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -232,6 +250,7 @@ struct SettingsView: View {
         }
         // Load security & moderation data
         blocked = (try? await supabase.fetchBlockedUsers()) ?? []
+        reported = (try? await supabase.fetchReportedUsers(limit: 100, offset: 0)) ?? []
         filtered = (try? await supabase.fetchFilteredWords()) ?? []
     }
 
@@ -330,4 +349,6 @@ struct SettingsView: View {
             banners.show(Banner(title: "Failed to submit report", style: .error))
         }
     }
+
+    
 }

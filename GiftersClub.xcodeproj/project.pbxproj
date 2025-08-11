@@ -216,9 +216,9 @@
 			);
 			mainGroup = 905EEEDD2E467EFA0073CC52;
 			minimizedProjectReferenceProxies = 1;
-            packageReferences = (
-                905EEF1C2E4686430073CC52 /* XCRemoteSwiftPackageReference "supabase-swift" */,
-            );
+			packageReferences = (
+				905EEF1C2E4686430073CC52 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 905EEEE72E467EFA0073CC52 /* Products */;
 			projectDirPath = "";

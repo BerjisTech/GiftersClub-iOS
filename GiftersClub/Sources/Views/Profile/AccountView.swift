@@ -42,7 +42,9 @@ struct AccountView: View {
                         }
                         HStack(spacing: 10) {
                             GradientButton(title: "Buy Tokens") { /* TODO: payment */ }
-                            GradientButton(title: "Withdraw") { /* TODO: navigate to withdraw */ }
+                            NavigationLink(destination: WithdrawalsView()) {
+                                GradientButton(title: "Withdraw") {}
+                            }
                         }
                     }
                     .padding(16)
@@ -106,9 +108,8 @@ struct AccountView: View {
             profile = try await supabase.fetchProfile(username: nil, userId: me)
             // TODO compute real activity summary via gifts/wishlists today
             activityText = "You have no activity today."
-            let gift = try? await supabase.giftCounts(userId: me)
-            giftsSent = gift?.sent ?? 0
-            giftsReceived = gift?.received ?? 0
+            giftsSent = profile?.gifts_sent ?? 0
+            giftsReceived = profile?.gifts_received ?? 0
             let wl = try? await supabase.wishlistCounts(userId: me)
             openWishlists = wl?.open ?? 0
             fulfilledWishlists = wl?.fulfilled ?? 0
