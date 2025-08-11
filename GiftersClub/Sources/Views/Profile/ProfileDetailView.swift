@@ -36,6 +36,7 @@ struct ProfileDetailView: View {
     @State private var gifts: [SupabaseManager.DBGift] = []
     @State private var showAccount = false
     @State private var showSettings = false
+    @State private var showChat = false
     @State private var isSelfView = false
     @State private var hasLoadedOnce = false
     private var loadKey: String { (username ?? "") + "|" + (userId ?? "") }
@@ -68,6 +69,16 @@ struct ProfileDetailView: View {
             }
             .navigationDestination(isPresented: $showAccount) { AccountView() }
             .navigationDestination(isPresented: $showSettings) { SettingsView() }
+            .navigationDestination(isPresented: $showChat) {
+                if let p = profile {
+                    ChatDetailView(partner: ConversationItem.Partner(
+                        userId: p.userId,
+                        username: p.username,
+                        displayName: p.name.isEmpty ? p.username : p.name,
+                        imageURL: p.imageURL
+                    ))
+                }
+            }
         }
     }
 
@@ -167,9 +178,7 @@ struct ProfileDetailView: View {
                     Task { await toggleFollow() }
                 }
                 // Chat
-                GradientButton(title: "Chat") {
-                    banners.show(Banner(title: "Open chat (TODO)", style: .info))
-                }
+                GradientButton(title: "Chat") { showChat = true }
             } else {
                 GradientButton(title: "Account") { showAccount = true }
                 GradientButton(title: "Settings") { showSettings = true }

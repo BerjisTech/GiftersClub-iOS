@@ -128,7 +128,7 @@ struct GifterProfileView: View {
         DrawerHost {
             ZStack(alignment: .top) {
                 ProfileDetailView(username: username)
-                BannerHost()
+                BannerHost().environmentObject(banners)
             }
         }
         .environmentObject(banners)
