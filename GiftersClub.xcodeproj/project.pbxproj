@@ -218,6 +218,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				905EEF1C2E4686430073CC52 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				90A630692E4A02D000A151C9 /* XCRemoteSwiftPackageReference "iOS-v3" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 905EEEE72E467EFA0073CC52 /* Products */;
@@ -582,6 +583,14 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 2.5.1;
+			};
+		};
+		90A630692E4A02D000A151C9 /* XCRemoteSwiftPackageReference "iOS-v3" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Flutterwave/iOS-v3";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.4.5;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
