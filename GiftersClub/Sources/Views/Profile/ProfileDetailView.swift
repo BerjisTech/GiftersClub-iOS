@@ -243,7 +243,7 @@ struct ProfileDetailView: View {
             WishlistsListView(items: wishlists)
                 .padding(.horizontal)
         case .gifts:
-            GiftsCatalogView(sort: giftsSort)
+            GiftsCatalogView(sort: giftsSort, presetRecipientId: profile?.userId)
                 .padding(.horizontal)
         }
     }
@@ -407,14 +407,17 @@ private struct WishlistsListView: View {
 
 private struct GiftsCatalogView: View {
     let sort: GiftsSort
+    var presetRecipientId: String?
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
     private let supabase = SupabaseManager.shared
     @State private var items: [SupabaseManager.DBGift] = []
+    struct GiftWrapper: Identifiable { let id: String; let gift: SupabaseManager.DBGift }
+    @State private var selectedGift: GiftWrapper? = nil
     var body: some View {
         LazyVGrid(columns: columns, spacing: 10) {
             ForEach(items, id: \.id) { g in
                 VStack(spacing: 8) {
-                    if let src = g.image, let url = URL(string: src) {
+                    if let url = giftImageURL(g) {
                         AsyncImage(url: url) { img in
                             img.resizable().scaledToFill()
                         } placeholder: { ShimmerView() }
@@ -425,14 +428,33 @@ private struct GiftsCatalogView: View {
                     }
                     Text(g.name ?? "Gift").font(.caption)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { selectedGift = GiftWrapper(id: g.id, gift: g) }
             }
         }
         .padding(.vertical, 8)
         .task { await load() }
+        .sheet(item: $selectedGift) { wrap in
+            GiftSendSheet(gift: wrap.gift, presetRecipientId: presetRecipientId)
+                .presentationDetents([.fraction(0.5), .fraction(0.75)])
+                .presentationDragIndicator(.visible)
+        }
     }
     private func load() async {
         let key: SupabaseManager.GiftsSortKey
         switch sort { case .newest: key = .newest; case .popular: key = .popular; case .priceAsc: key = .priceAsc; case .priceDesc: key = .priceDesc }
         items = (try? await supabase.fetchGifts(sort: key, limit: 40)) ?? []
+    }
+    private func giftImageURL(_ g: SupabaseManager.DBGift) -> URL? {
+        if let src = g.image, !src.isEmpty {
+            if src.lowercased().hasPrefix("http") { return URL(string: src) }
+            let path = src.hasPrefix("/") ? String(src.dropFirst()) : src
+            return SupabaseConfig.webBase.appendingPathComponent(path)
+        }
+        if let name = g.name?.lowercased() {
+            let filename = (name + ".png").addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? (name + ".png")
+            return SupabaseConfig.webBase.appendingPathComponent("assets/images/gifts/\(filename)")
+        }
+        return nil
     }
 }

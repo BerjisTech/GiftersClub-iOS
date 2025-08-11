@@ -91,6 +91,7 @@ final class SupabaseManager: ObservableObject {
         let name: String?
         let bio: String?
         let image: String?
+        let email: String?
         let followers_count: Int?
         let following_count: Int?
         let token_balance: Int?
@@ -245,6 +246,93 @@ final class SupabaseManager: ObservableObject {
             .from("search_queries")
             .insert([Row(user_id: me, query: q)])
             .execute()
+    }
+
+    // MARK: - Token Transactions (Top-up)
+    struct TokenTransactionInsert: Encodable {
+        let user_id: String
+        let transaction_type: String // e.g., "purchase"
+        let tokens: Int
+        let kes_amount: Int
+        let flutterwave_transaction_id: String
+        let flutterwave_transaction_status: String // e.g., "initiated" | "successful"
+        let reference_id: String
+    }
+
+    struct TokenTransactionRow: Decodable { let id: String }
+
+    func recordTokenTransaction(_ tx: TokenTransactionInsert) async throws -> String? {
+        let res: PostgrestResponse<[TokenTransactionRow]> = try await client
+            .from("token_transactions")
+            .insert([tx])
+            .select("id")
+            .execute()
+        return res.value.first?.id
+    }
+
+    func updateTokenTransaction(id: String, status: String) async throws {
+        _ = try await client
+            .from("token_transactions")
+            .update(["flutterwave_transaction_status": status])
+            .eq("id", value: id)
+            .execute()
+    }
+
+    /// Call Edge Function to credit purchased tokens on successful payment.
+    func processPurchaseTokens(userId: String, tokens: Int, txRef: String) async throws {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/purchase-tokens")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload = ["userId": userId, "tokens": tokens, "txRef": txRef] as [String : Any]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    // MARK: - Gifting
+    struct GiftFunctionPayload: Encodable { let giftId: String; let gifterId: String; let recipientId: String; let tokens: Int; let txRef: String }
+    /// Invoke Edge Function 'send-gift' to process gifting (balance updates, counts, notifications).
+    func sendGift(giftId: String, recipientId: String, tokens: Int) async throws {
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/send-gift")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let txRef = "ios_\(me)_\(giftId)_\(Int(Date().timeIntervalSince1970))"
+        let payload = GiftFunctionPayload(giftId: giftId, gifterId: me, recipientId: recipientId, tokens: tokens, txRef: txRef)
+        req.httpBody = try JSONEncoder().encode(payload)
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    /// Search users by username, name, or email (case-insensitive), excluding current user.
+    func searchProfilesByKeyword(_ keyword: String, limit: Int = 10) async throws -> [DBProfile] {
+        let term = "%\(keyword)%"
+        var q = client
+            .from("profiles")
+            .select("user_id,username,name,image,email,token_balance")
+            .or("username.ilike.\(term),name.ilike.\(term),email.ilike.\(term)")
+        if let me = user?.id.uuidString {
+            q = q.neq("user_id", value: me)
+        }
+        let res: PostgrestResponse<[DBProfile]> = try await q
+            .order("username", ascending: true)
+            .limit(limit)
+            .execute()
+        return res.value
     }
 
     // MARK: - Comments

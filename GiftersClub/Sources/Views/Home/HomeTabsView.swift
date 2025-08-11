@@ -37,16 +37,26 @@ struct HomeTabsView: View {
 
 // MARK: - Gifts
 struct GiftsHomeView: View {
+    struct GiftWrapper: Identifiable { let id: String; let gift: SupabaseManager.DBGift }
+    @State private var selectedGift: GiftWrapper? = nil
     var body: some View {
-        GiftsGridView(sort: .newest)
+        GiftsGridView(sort: .newest) { gift in
+            selectedGift = GiftWrapper(id: gift.id, gift: gift)
+        }
             .padding(.horizontal)
             .padding(.top, 8)
+            .sheet(item: $selectedGift) { wrap in
+                GiftSendSheet(gift: wrap.gift, presetRecipientId: nil)
+                    .presentationDetents([.fraction(0.5), .fraction(0.75)])
+                    .presentationDragIndicator(.visible)
+            }
     }
 }
 
 private struct GiftsGridView: View {
     enum Sort { case newest, popular, priceAsc, priceDesc }
     let sort: Sort
+    var onSelect: (SupabaseManager.DBGift) -> Void = { _ in }
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
     @ObservedObject private var supabase = SupabaseManager.shared
     @State private var items: [SupabaseManager.DBGift] = []
@@ -59,7 +69,7 @@ private struct GiftsGridView: View {
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(items, id: \.id) { g in
                     VStack(spacing: 8) {
-                        if let src = g.image, let url = buildURL(src) {
+                        if let url = giftImageURL(g) {
                             AsyncImage(url: url) { img in
                                 img.resizable().scaledToFill()
                             } placeholder: { ShimmerView() }
@@ -70,6 +80,8 @@ private struct GiftsGridView: View {
                         }
                         Text(g.name ?? "Gift").font(.caption)
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture { onSelect(g) }
                 }
             }
             .padding(.vertical, 8)
@@ -83,10 +95,19 @@ private struct GiftsGridView: View {
         switch sort { case .newest: key = .newest; case .popular: key = .popular; case .priceAsc: key = .priceAsc; case .priceDesc: key = .priceDesc }
         items = (try? await supabase.fetchGifts(sort: key, limit: 60)) ?? []
     }
-    private func buildURL(_ src: String) -> URL? {
-        if src.lowercased().hasPrefix("http") { return URL(string: src) }
-        let trimmed = src.hasPrefix("/") ? String(src.dropFirst()) : src
-        return SupabaseConfig.url.appendingPathComponent(trimmed)
+    private func giftImageURL(_ g: SupabaseManager.DBGift) -> URL? {
+        if let src = g.image, !src.isEmpty {
+            if src.lowercased().hasPrefix("http") { return URL(string: src) }
+            // Treat as web static asset path
+            let path = src.hasPrefix("/") ? String(src.dropFirst()) : src
+            return SupabaseConfig.webBase.appendingPathComponent(path)
+        }
+        // Fallback to conventional Angular assets path by name
+        if let name = g.name?.lowercased() {
+            let filename = (name + ".png").addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? (name + ".png")
+            return SupabaseConfig.webBase.appendingPathComponent("assets/images/gifts/\(filename)")
+        }
+        return nil
     }
 }
 
