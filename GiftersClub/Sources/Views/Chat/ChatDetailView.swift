@@ -29,7 +29,8 @@ struct ChatDetailView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
             }
             .listStyle(.plain)
-
+        }
+        .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
                 TextField("Message", text: $input)
                     .textFieldStyle(.roundedBorder)
@@ -42,11 +43,13 @@ struct ChatDetailView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
             .background(.thinMaterial)
+            .padding(.bottom, CustomBottomBar.barHeight)
         }
         .navigationTitle(partner.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .task { await initialLoad() }
         .onDisappear { pollTask?.cancel(); pollTask = nil }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private func initialLoad() async {
