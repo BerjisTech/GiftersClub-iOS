@@ -150,30 +150,167 @@ private struct TopTabsBar: View {
 // MARK: - Wishlists
 struct WishlistsHomeView: View {
     @ObservedObject private var supabase = SupabaseManager.shared
-    @State private var items: [SupabaseManager.DBWishlist] = []
+    @State private var items: [SupabaseManager.DBWishlistFull] = []
     @State private var isLoading = false
+    @State private var showCreate = false
     var body: some View {
-        List {
-            if isLoading { ProgressView().frame(maxWidth: .infinity) }
-            else if items.isEmpty { Text("No wishlists yet").foregroundStyle(.secondary) }
-            else {
-                ForEach(items, id: \.id) { w in
-                    HStack {
-                        RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 44, height: 44)
-                        Text(w.title ?? "Untitled wishlist").font(.subheadline)
-                        Spacer()
+        NavigationStack {
+            List {
+                if isLoading { ProgressView().frame(maxWidth: .infinity) }
+                else if items.isEmpty { Text("No wishlists yet").foregroundStyle(.secondary) }
+                else {
+                    ForEach(items, id: \.id) { w in
+                        NavigationLink(value: w.id) {
+                            HStack(spacing: 12) {
+                                if let url = wishlistImageURL(w.image) {
+                                    AsyncImage(url: url) { img in
+                                        img.resizable().scaledToFill()
+                                    } placeholder: { ShimmerView() }
+                                    .frame(width: 48, height: 48)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 48, height: 48)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(w.name?.isEmpty == false ? (w.name ?? "Wishlist") : "Wishlist").font(.subheadline).foregroundStyle(.primary)
+                                    if let desc = w.description, !desc.isEmpty {
+                                        Text(desc).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    if let max = w.tokens, max > 0 {
+                                        let contributed = (w.wishlist_contributions ?? []).reduce(0) { $0 + $1.tokens }
+                                        ProgressView(value: Double(contributed), total: Double(max))
+                                            .tint(AppColors.primaryEnd)
+                                    }
+                                }
+                                Spacer()
+                            }
+                            .padding(6)
+                        }
                     }
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
                 }
             }
+            .navigationDestination(for: String.self) { wid in
+                WishlistDetailView(wishlistId: wid)
+            }
+            .navigationTitle("Wishlists")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { showCreate = true } label: { Image(systemName: "plus") } } }
         }
+        .sheet(isPresented: $showCreate) { CreateWishlistView() }
         .task { await load() }
         .refreshable { await load() }
     }
     private func load() async {
         isLoading = true; defer { isLoading = false }
-        guard let me = supabase.user?.id.uuidString else { items = []; return }
-        items = (try? await supabase.fetchWishlists(userId: me, limit: 50)) ?? []
+        items = (try? await supabase.fetchAllWishlistsDetailed(limit: 50)) ?? []
+    }
+    private func wishlistImageURL(_ src: String?) -> URL? {
+        guard let src, !src.isEmpty else { return nil }
+        if src.lowercased().hasPrefix("http") { return URL(string: src) }
+        let path = src.hasPrefix("/") ? String(src.dropFirst()) : src
+        return SupabaseConfig.webBase.appendingPathComponent(path)
+    }
+}
+
+struct WishlistDetailView: View {
+    let wishlistId: String
+    @ObservedObject private var supabase = SupabaseManager.shared
+    @State private var wishlist: SupabaseManager.DBWishlistFull?
+    @State private var contributions: [SupabaseManager.DBWishlistContribution] = []
+    @State private var contributorProfiles: [SupabaseManager.DBProfile] = []
+    @State private var isLoading = false
+    var body: some View {
+        ScrollView {
+            if isLoading { ProgressView().frame(maxWidth: .infinity) }
+            if let w = wishlist {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let url = wishlistImageURL(w.image) {
+                        AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { ShimmerView() }
+                            .frame(height: 180)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    Text(w.name ?? "Wishlist").font(.title2).bold()
+                    if let owner = w.profile { HStack(spacing: 8) { Circle().fill(Color.primary.opacity(0.06)).frame(width: 24, height: 24); Text(owner.name ?? owner.username).font(.subheadline).foregroundStyle(.secondary) } }
+                    if let desc = w.description, !desc.isEmpty { Text(desc).font(.body) }
+                    if let max = w.tokens {
+                        let contributed = contributions.reduce(0) { $0 + $1.tokens }
+                        VStack(alignment: .leading, spacing: 6) {
+                            ProgressView(value: Double(contributed), total: Double(max)).tint(AppColors.primaryEnd)
+                            Text("\(contributed) / \(max) tokens").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Divider()
+                    Text("Contributors").font(.headline)
+                    if contributorProfiles.isEmpty { Text("No contributions yet").foregroundStyle(.secondary) }
+                    else {
+                        ForEach(contributorProfiles, id: \.user_id) { p in
+                            HStack { RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 32, height: 32); Text(p.name ?? p.username).font(.subheadline); Spacer() }
+                        }
+                    }
+                }
+                .padding()
+            }
+        }
+        .navigationTitle("Wishlist")
+        .task { await load() }
+        .refreshable { await load() }
+    }
+    private func load() async {
+        isLoading = true; defer { isLoading = false }
+        wishlist = try? await supabase.fetchWishlistById(wishlistId)
+        contributions = (try? await supabase.fetchWishlistContributions(wishlistId: wishlistId)) ?? []
+        let ids = Array(Set(contributions.map { $0.contributor_id }))
+        contributorProfiles = (try? await supabase.fetchProfilesByUserIds(ids)) ?? []
+    }
+    private func wishlistImageURL(_ src: String?) -> URL? {
+        guard let src, !src.isEmpty else { return nil }
+        if src.lowercased().hasPrefix("http") { return URL(string: src) }
+        let path = src.hasPrefix("/") ? String(src.dropFirst()) : src
+        return SupabaseConfig.webBase.appendingPathComponent(path)
+    }
+}
+
+struct CreateWishlistView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var supabase = SupabaseManager.shared
+    @State private var name: String = ""
+    @State private var description: String = ""
+    @State private var link: String = ""
+    @State private var image: String = ""
+    @State private var tokensText: String = ""
+    @State private var isSaving = false
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Details") {
+                    TextField("Name", text: $name)
+                    TextField("Description", text: $description, axis: .vertical)
+                    TextField("Target tokens", text: $tokensText).keyboardType(.numberPad)
+                }
+                Section("Links (optional)") {
+                    TextField("Image URL or path", text: $image)
+                    TextField("External link", text: $link)
+                }
+            }
+            .navigationTitle("New Wishlist")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(action: { Task { await save() } }) { if isSaving { ProgressView() } else { Text("Save") } }.disabled(isSaving) } }
+        }
+    }
+    private func save() async {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let me = supabase.user?.id.uuidString else { return }
+        isSaving = true; defer { isSaving = false }
+        let tokens = Int(tokensText.filter { $0.isNumber }) ?? 0
+        let input = SupabaseManager.CreateWishlistInput(
+            user_id: me,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            description: description.trimmingCharacters(in: .whitespacesAndNewlines),
+            link: link.isEmpty ? nil : link,
+            image: image.isEmpty ? nil : image,
+            tokens: tokens,
+            is_fulfilled: false
+        )
+        _ = try? await supabase.createWishlist(input)
+        dismiss()
     }
 }

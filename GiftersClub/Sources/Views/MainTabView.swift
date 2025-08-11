@@ -120,11 +120,6 @@ struct ProfileView: View {
     }
 }
 
-struct WishlistDetailView: View {
-    let wishlistId: String
-    var body: some View { Text("Wishlist: \(wishlistId)").padding() }
-}
-
 struct GifterProfileView: View {
     let username: String
     @StateObject private var banners = BannerQueue()

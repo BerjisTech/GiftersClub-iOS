@@ -102,6 +102,30 @@ final class SupabaseManager: ObservableObject {
     struct DBPost: Decodable { let id: String; let user_id: String }
     struct DBPostMedia: Decodable { let post_id: String; let url: String; let order: Int? }
     struct DBWishlist: Decodable { let id: String; let title: String? }
+    // Full wishlist row with optional embedded profile and contributions (tokens only)
+    struct DBWishlistFull: Decodable, Identifiable {
+        let id: String
+        let user_id: String
+        let link: String?
+        let name: String?
+        let description: String?
+        let image: String?
+        let tokens: Int?
+        let is_fulfilled: Bool?
+        let created_at: String?
+        let profile: DBProfile?
+        let wishlist_contributions: [DBWishlistContributionToken]?
+    }
+    struct DBWishlistContributionToken: Decodable { let tokens: Int }
+    struct DBWishlistContribution: Decodable {
+        let id: String
+        let user_id: String
+        let contributor_id: String
+        let wishlist_id: String
+        let tokens: Int
+        let created_at: String?
+        let updated_at: String?
+    }
     struct DBGift: Decodable { let id: String; let name: String?; let tokens: Int?; let image: String? }
     struct DBTopGifter: Decodable {
         let user_id: String
@@ -502,6 +526,95 @@ final class SupabaseManager: ObservableObject {
             .limit(limit)
             .execute()
         return res.value
+    }
+
+    // MARK: - Wishlists (detailed for list/detail)
+    func fetchWishlistsDetailed(userId: String, limit: Int = 30, offset: Int = 0) async throws -> [DBWishlistFull] {
+        let res: PostgrestResponse<[DBWishlistFull]> = try await client
+            .from("wishlists")
+            .select("id,user_id,link,name,description,image,tokens,is_fulfilled,created_at,profile:profiles(user_id,username,name,image),wishlist_contributions(tokens)")
+            .eq("user_id", value: userId)
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+        return res.value
+    }
+
+    func fetchAllWishlistsDetailed(limit: Int = 30, offset: Int = 0) async throws -> [DBWishlistFull] {
+        let res: PostgrestResponse<[DBWishlistFull]> = try await client
+            .from("wishlists")
+            .select("id,user_id,link,name,description,image,tokens,is_fulfilled,created_at,profile:profiles(user_id,username,name,image),wishlist_contributions(tokens)")
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+        return res.value
+    }
+
+    func fetchWishlistById(_ id: String) async throws -> DBWishlistFull? {
+        let res: PostgrestResponse<[DBWishlistFull]> = try await client
+            .from("wishlists")
+            .select("id,user_id,link,name,description,image,tokens,is_fulfilled,created_at,profile:profiles(user_id,username,name,image),wishlist_contributions(tokens)")
+            .eq("id", value: id)
+            .limit(1)
+            .execute()
+        return res.value.first
+    }
+
+    func fetchWishlistContributions(wishlistId: String) async throws -> [DBWishlistContribution] {
+        let res: PostgrestResponse<[DBWishlistContribution]> = try await client
+            .from("wishlist_contributions")
+            .select("id,user_id,contributor_id,wishlist_id,tokens,created_at,updated_at")
+            .eq("wishlist_id", value: wishlistId)
+            .order("created_at", ascending: false)
+            .limit(1000)
+            .execute()
+        return res.value
+    }
+
+    func fetchProfilesByUserIds(_ ids: [String]) async throws -> [DBProfile] {
+        guard !ids.isEmpty else { return [] }
+        let res: PostgrestResponse<[DBProfile]> = try await client
+            .from("profiles")
+            .select("user_id,username,name,image,email")
+            .in("user_id", values: ids)
+            .execute()
+        return res.value
+    }
+
+    struct CreateWishlistInput: Encodable {
+        let user_id: String
+        let name: String
+        let description: String
+        let link: String?
+        let image: String?
+        let tokens: Int
+        let is_fulfilled: Bool
+    }
+
+    func createWishlist(_ input: CreateWishlistInput) async throws -> String? {
+        let res: PostgrestResponse<[[String: String]]> = try await client
+            .from("wishlists")
+            .insert([input])
+            .select("id")
+            .execute()
+        return res.value.first?["id"]
+    }
+
+    struct UpdateWishlistInput: Encodable {
+        var name: String?
+        var description: String?
+        var link: String?
+        var image: String?
+        var tokens: Int?
+        var is_fulfilled: Bool?
+    }
+
+    func updateWishlist(id: String, updates: UpdateWishlistInput) async throws {
+        _ = try await client
+            .from("wishlists")
+            .update(updates)
+            .eq("id", value: id)
+            .execute()
     }
 
     // MARK: - Gifts (catalog)

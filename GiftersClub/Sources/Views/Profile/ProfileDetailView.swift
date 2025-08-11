@@ -240,7 +240,11 @@ struct ProfileDetailView: View {
             PostsGridView(thumbs: postThumbs)
                 .padding(.horizontal)
         case .wishlists:
-            WishlistsListView(items: wishlists)
+            WishlistsListView(
+                items: wishlists,
+                isSelfView: isSelfView,
+                username: profile?.username ?? ""
+            )
                 .padding(.horizontal)
         case .gifts:
             GiftsCatalogView(sort: giftsSort, presetRecipientId: profile?.userId)
@@ -384,20 +388,28 @@ private struct PostsGridView: View {
 
 private struct WishlistsListView: View {
     let items: [SupabaseManager.DBWishlist]
+    let isSelfView: Bool
+    let username: String
     var body: some View {
         if items.isEmpty {
-            VStack(spacing: 8) { Text("No wishlists yet").foregroundStyle(.secondary) }
-                .padding(.vertical, 16)
+            VStack(spacing: 8) {
+                if isSelfView { Text("You have not created a wishlist yet").foregroundStyle(.secondary) }
+                else { Text("@\(username) has not created any wishlists").foregroundStyle(.secondary) }
+            }
+            .padding(.vertical, 16)
         } else {
             VStack(spacing: 8) {
                 ForEach(items, id: \.id) { w in
-                    HStack {
-                        RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 44, height: 44)
-                        Text(w.title ?? "Untitled wishlist").font(.subheadline)
-                        Spacer()
+                    NavigationLink(destination: WishlistDetailView(wishlistId: w.id)) {
+                        HStack {
+                            RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 44, height: 44)
+                            Text(w.title ?? "Untitled wishlist").font(.subheadline)
+                            Spacer()
+                        }
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
                     }
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.vertical, 8)
