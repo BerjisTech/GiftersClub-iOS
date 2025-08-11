@@ -218,11 +218,15 @@ private struct PostPageView: View {
                                 ForEach(Array(tags), id: \.self) { t in
                                     Text("#\(t)")
                                         .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.white.opacity(0.9))
+                                        .foregroundStyle(.white)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .background(Color.white.opacity(0.2))
+                                        .background(Color.white.opacity(0.22))
                                         .clipShape(Capsule())
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            NotificationCenter.default.post(name: .exploreSearch, object: "#\(t)")
+                                        }
                                 }
                             }
                         }

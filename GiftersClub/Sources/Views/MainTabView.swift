@@ -7,6 +7,7 @@ struct MainTabView: View {
     @State private var rootTab: RootTab = .home
     @State private var showComposer = false
     @State private var profileRouteUsername: String? = nil
+    @State private var exploreQuery: String? = nil
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -14,7 +15,7 @@ struct MainTabView: View {
             ZStack {
                 switch rootTab {
                 case .home: HomeTabsView()
-                case .explore: ExploreView()
+                case .explore: ExploreView(externalQuery: $exploreQuery)
                 case .chat: ChatListView()
                 case .profile: ProfileView(routeUsername: $profileRouteUsername)
                 }
@@ -43,6 +44,12 @@ struct MainTabView: View {
             // Clear after handling
             self.deepLink = nil
         }
+        .onReceive(NotificationCenter.default.publisher(for: .exploreSearch)) { note in
+            if let q = note.object as? String {
+                exploreQuery = q
+                rootTab = .explore
+            }
+        }
     }
 
     private func route(_ link: DeepLink) {
@@ -65,6 +72,7 @@ extension Notification.Name {
     static let showGifterProfile = Notification.Name("showGifterProfile")
     static let showCurrentProfile = Notification.Name("showCurrentProfile")
     static let showHomeWishlists = Notification.Name("showHomeWishlists")
+    static let exploreSearch = Notification.Name("exploreSearch")
 }
 
 // MARK: - Placeholder Tab Views

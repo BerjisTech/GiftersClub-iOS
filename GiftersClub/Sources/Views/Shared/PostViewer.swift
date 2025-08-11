@@ -89,6 +89,10 @@ struct PostViewer: View {
                             .font(.footnote)
                             .foregroundStyle(.white)
                             .lineLimit(3)
+                        let tags = extractHashtags(model.caption)
+                        if !tags.isEmpty {
+                            WrapTagsView(tags: tags)
+                        }
                     }
                 }
                 Spacer()
@@ -139,6 +143,41 @@ private struct ZoomableAsyncImage: View {
                 img.resizable().scaledToFit().frame(maxWidth: geo.size.width, maxHeight: geo.size.height)
             } placeholder: { Color.black }
         }.ignoresSafeArea()
+    }
+}
+
+// MARK: - Hashtag Pills
+private struct WrapTagsView: View {
+    let tags: [String]
+    var body: some View {
+        // Simple horizontal flow; wraps naturally across lines in SwiftUI when embedded in VStack
+        // because we’ll chunk into rows by width if needed. For simplicity, just a horizontal scroll for now.
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(tags.prefix(6), id: \.self) { t in
+                    Text("#\(t)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .contentShape(Rectangle())
+                        .onTapGesture { NotificationCenter.default.post(name: .exploreSearch, object: "#\(t)") }
+                }
+            }
+        }
+    }
+}
+
+private func extractHashtags(_ text: String) -> [String] {
+    let pattern = "#([A-Za-z0-9_]+)"
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+    let ns = text as NSString
+    let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: ns.length))
+    return matches.compactMap { m in
+        guard m.numberOfRanges > 1 else { return nil }
+        return ns.substring(with: m.range(at: 1))
     }
 }
 

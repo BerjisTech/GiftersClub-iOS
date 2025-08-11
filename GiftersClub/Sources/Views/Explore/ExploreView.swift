@@ -3,6 +3,7 @@ import SwiftUI
 private enum ExploreTab: String, CaseIterable { case top = "Top", photos = "Photos", videos = "Videos", users = "Users" }
 
 struct ExploreView: View {
+    @Binding var externalQuery: String?
     @State private var query: String = ""
     @State private var activeTab: ExploreTab = .top
     @State private var isSearching = false
@@ -62,7 +63,13 @@ struct ExploreView: View {
                 ProfileDetailView(username: user.username)
             }
             .task { await loadSuggestions() }
+            .onAppear { consumeExternalQueryIfNeeded() }
+            .onChange(of: externalQuery) { _, _ in consumeExternalQueryIfNeeded() }
         }
+    }
+
+    init(externalQuery: Binding<String?> = .constant(nil)) {
+        self._externalQuery = externalQuery
     }
 
 private struct SearchBarHeightKey: PreferenceKey {
@@ -202,6 +209,12 @@ private struct SearchBarHeightKey: PreferenceKey {
         let recSet = Set(a.map { $0.lowercased() })
         let filteredTrend = b.filter { !recSet.contains($0.lowercased()) }
         await MainActor.run { recentSuggestions = a; trendingSuggestions = filteredTrend }
+    }
+
+    private func consumeExternalQueryIfNeeded() {
+        guard let q = externalQuery, !q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        externalQuery = nil
+        runSearch(q)
     }
 }
 
