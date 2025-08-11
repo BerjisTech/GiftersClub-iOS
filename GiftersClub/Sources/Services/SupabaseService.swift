@@ -302,6 +302,20 @@ final class SupabaseManager: ObservableObject {
         }
     }
 
+    /// Fetch a set of post IDs that the current user has liked.
+    func fetchUserLikedPostIDs(postIDs: [String]) async throws -> Set<String> {
+        guard let me = user?.id.uuidString, !postIDs.isEmpty else { return [] }
+        struct Row: Decodable { let post_id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("post_reactions")
+            .select("post_id")
+            .eq("user_id", value: me)
+            .eq("type", value: "like")
+            .in("post_id", values: postIDs)
+            .execute()
+        return Set(res.value.map { $0.post_id })
+    }
+
     // MARK: - Profile Fetch
     func fetchProfile(username: String?, userId: String?) async throws -> DBProfile? {
         if let u = username {

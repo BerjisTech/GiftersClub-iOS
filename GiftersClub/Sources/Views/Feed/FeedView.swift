@@ -65,7 +65,12 @@ struct HomeView: View {
         defer { Task { await MainActor.run { isLoading = false } } }
         do {
             let rows = try await supabase.fetchFeed(limit: 10, offset: 0)
-            let mapped = rows.compactMap(mapRow)
+            var mapped = rows.compactMap(mapRow)
+            // Initialize liked state for current user
+            let ids = mapped.map { $0.id }
+            if let liked = try? await supabase.fetchUserLikedPostIDs(postIDs: ids) {
+                for i in mapped.indices { mapped[i].isLiked = liked.contains(mapped[i].id) }
+            }
             await MainActor.run {
                 posts = mapped
                 selection = 0
@@ -307,7 +312,19 @@ private struct PostPageView: View {
         } else {
             showBreak = true
         }
-        Task { try? await SupabaseManager.shared.setLike(postId: post.id, like: willLike) }
+        Task {
+            do {
+                try await SupabaseManager.shared.setLike(postId: post.id, like: willLike)
+            } catch {
+                // Revert UI on failure
+                await MainActor.run {
+                    var reverted = post
+                    reverted.isLiked.toggle()
+                    reverted.likes += reverted.isLiked ? 1 : -1
+                    post = reverted
+                }
+            }
+        }
     }
 
     private func share() {

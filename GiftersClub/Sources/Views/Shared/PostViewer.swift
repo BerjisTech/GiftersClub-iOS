@@ -20,6 +20,7 @@ struct PostViewer: View {
     @State private var magnify: CGFloat = 1.0
     @State private var showLike = false
     @State private var showDislike = false
+    @State private var liked = false
 
     var overlaysHidden: Bool { magnify > 1.01 || isPaused }
 
@@ -97,8 +98,8 @@ struct PostViewer: View {
                 }
                 Spacer()
                 VStack(spacing: 18) {
-                    Image(systemName: "heart")
-                        .foregroundStyle(.white)
+                    Image(systemName: liked ? "heart.fill" : "heart")
+                        .foregroundStyle(liked ? .red : .white)
                         .font(.title2.weight(.semibold))
                         .onTapGesture { like() }
                     Image(systemName: "arrowshape.turn.up.forward.fill")
@@ -119,7 +120,22 @@ struct PostViewer: View {
     private var magnifyGesture: some Gesture {
         MagnificationGesture().onChanged { v in magnify = min(max(v, 1.0), 3.0) }.onEnded { _ in withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { if magnify < 1.05 { magnify = 1.0 } } }
     }
-    private func like() { if showDislike { showDislike = false }; showLike = true }
+    private func like() {
+        let willLike = !liked
+        liked = willLike
+        if willLike {
+            if showDislike { showDislike = false }
+            showLike = true
+        } else {
+            showDislike = true
+        }
+        Task {
+            do { try await SupabaseManager.shared.setLike(postId: model.id, like: willLike) }
+            catch {
+                await MainActor.run { liked.toggle() }
+            }
+        }
+    }
 }
 
 private struct AutoPlayVideo: View {
