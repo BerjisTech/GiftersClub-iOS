@@ -11,27 +11,43 @@ struct ChatDetailView: View {
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var selectedData: Data? = nil
     @State private var selectedMime: String? = nil
+    @State private var isSending: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
-            List(messages) { msg in
-                VStack(alignment: .leading, spacing: 6) {
-                    VStack(alignment: .leading, spacing: 6) {
+            ScrollViewReader { proxy in
+                List(messages) { msg in
+                    // Build the full message content stack: bubble, media, time
+                    let content = VStack(alignment: .leading, spacing: 6) {
                         if !msg.text.isEmpty { Bubble(text: msg.text, fromMe: msg.fromMe) }
-                        if let atts = msg.attachments, !atts.isEmpty {
-                            AttachmentsGrid(attachments: atts, fromMe: msg.fromMe)
+                        if let atts = msg.attachments, !atts.isEmpty { AttachmentsGrid(attachments: atts) }
+                        HStack {
+                            if msg.fromMe { Spacer(minLength: 0) }
+                            Text(msg.time)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            if !msg.fromMe { Spacer(minLength: 0) }
                         }
                     }
-                    Text(msg.time)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+
+                    // Align entire message row (text + media + time) to side using HStack + Spacer
+                    Group {
+                        if msg.fromMe {
+                            HStack(alignment: .top, spacing: 0) { Spacer(minLength: 0); content }
+                        } else {
+                            HStack(alignment: .top, spacing: 0) { content; Spacer(minLength: 0) }
+                        }
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .id(msg.id)
                 }
-                .frame(maxWidth: .infinity, alignment: msg.fromMe ? .trailing : .leading)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listStyle(.plain)
+                .transaction { t in t.animation = nil }
+                .onChange(of: messages.last?.id) { _, last in
+                    if let last { withAnimation { proxy.scrollTo(last, anchor: .bottom) } }
+                }
             }
-            .listStyle(.plain)
-            .transaction { t in t.animation = nil }
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 8) {
@@ -72,7 +88,7 @@ struct ChatDetailView: View {
                     Image(systemName: "paperplane.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedData == nil)
+                .disabled(isSending || (input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedData == nil))
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 8)
@@ -83,7 +99,10 @@ struct ChatDetailView: View {
         .navigationTitle(partner.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .task { await initialLoad() }
-        .onDisappear { pollTask?.cancel(); pollTask = nil }
+        .onDisappear {
+            pollTask?.cancel(); pollTask = nil
+            Task { await supabase.unsubscribeChat(partnerId: partner.userId) }
+        }
         .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
@@ -107,6 +126,24 @@ struct ChatDetailView: View {
         }
         await markRead()
         await loadMessages()
+        // Subscribe to realtime inserts for this chat (stubbed), and keep polling fallback
+        await supabase.subscribeToChat(partnerId: partner.userId) { msg in
+            Task { @MainActor in
+                if !messages.contains(where: { $0.id == msg.id }) {
+                    let mapped = MessageItem(
+                        id: msg.id,
+                        fromMe: msg.sender_id != partner.userId,
+                        text: msg.content,
+                        time: Self.relativeTime(msg.created_at),
+                        attachments: msg.attachments?.compactMap { a in
+                            guard let u = a.url, let url = URL(string: u) else { return nil }
+                            return ChatAttachment(url: url, type: a.type ?? "image")
+                        }
+                    )
+                    messages.append(mapped)
+                }
+            }
+        }
         startPolling()
     }
 
@@ -148,15 +185,17 @@ struct ChatDetailView: View {
     private func send() async {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty && selectedData == nil { return }
-        input = ""
+        input = ""; isSending = true
         do {
             var attachments: [SupabaseManager.MessageAttachment] = []
             if let data = selectedData, let mime = selectedMime {
                 let ext = mime.split(separator: "/").last.map(String.init) ?? "bin"
                 let name = "chat-\(Int(Date().timeIntervalSince1970)).\(ext)"
-                // Insert shimmer placeholder message on my side while uploading
+                // Insert shimmer placeholder message on my side while uploading and hide preview immediately
+                let phId = "local-\(name)"
                 let ph = ChatAttachment(url: nil, type: mime.hasPrefix("image/") ? "image" : (mime.hasPrefix("video/") ? "video" : "file"))
-                messages.append(MessageItem(id: "local-\(name)", fromMe: true, text: "", time: "now", attachments: [ph]))
+                messages.append(MessageItem(id: phId, fromMe: true, text: "", time: "now", attachments: [ph]))
+                selectedData = nil; selectedMime = nil; selectedItem = nil
                 let publicUrl = try await supabase.uploadMedia(bytes: data, fileName: name, mimeType: mime, bucket: "post")
                 let kind = mime.hasPrefix("image/") ? "image" : (mime.hasPrefix("video/") ? "video" : "file")
                 attachments.append(.init(url: publicUrl, type: kind))
@@ -169,9 +208,10 @@ struct ChatDetailView: View {
             selectedData = nil; selectedMime = nil; selectedItem = nil
             await markRead()
             await loadMessages()
+            isSending = false
         } catch {
             // Ideally show a banner. For now, restore input on failure
-            input = text
+            input = text; isSending = false
         }
     }
 
@@ -225,36 +265,31 @@ struct ChatAttachment: Identifiable { let id: String; let url: URL?; let type: S
 
 private struct AttachmentsGrid: View {
     let attachments: [ChatAttachment]
-    let fromMe: Bool
     @State private var viewer: PostViewerModel? = nil
     private let columns = [GridItem(.fixed(120))]
     var body: some View {
-        HStack {
-            if fromMe { Spacer(minLength: 0) }
-            LazyVGrid(columns: columns, spacing: 6) {
-                ForEach(attachments, id: \.id) { att in
-                    ZStack {
-                        if att.url == nil {
-                            ShimmerView()
-                        } else if att.type == "image" {
-                            AsyncImage(url: att.url) { img in img.resizable().scaledToFill().clipped() } placeholder: { ShimmerView() }
-                        } else if att.type == "video" {
-                            ZStack {
-                                Rectangle().fill(Color.primary.opacity(0.06))
-                                Image(systemName: "play.circle.fill").font(.system(size: 28)).foregroundStyle(.white)
-                            }
-                        } else {
-                            RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06))
-                            Image(systemName: "paperclip").foregroundStyle(.secondary)
+        LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(attachments, id: \.id) { att in
+                ZStack {
+                    if att.url == nil {
+                        ShimmerView()
+                    } else if att.type == "image" {
+                        AsyncImage(url: att.url) { img in img.resizable().scaledToFill().clipped() } placeholder: { ShimmerView() }
+                    } else if att.type == "video" {
+                        ZStack {
+                            Rectangle().fill(Color.primary.opacity(0.06))
+                            Image(systemName: "play.circle.fill").font(.system(size: 28)).foregroundStyle(.white)
                         }
+                    } else {
+                        RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06))
+                        Image(systemName: "paperclip").foregroundStyle(.secondary)
                     }
-                    .frame(width: 120, height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .contentShape(Rectangle())
-                    .onTapGesture { if let _ = att.url { open(att) } }
                 }
+                .frame(width: 120, height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .contentShape(Rectangle())
+                .onTapGesture { if let _ = att.url { open(att) } }
             }
-            if !fromMe { Spacer(minLength: 0) }
         }
         .sheet(item: $viewer) { model in
             PostViewer(model: model)

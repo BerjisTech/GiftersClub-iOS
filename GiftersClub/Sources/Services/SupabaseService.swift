@@ -868,6 +868,40 @@ final class SupabaseManager: ObservableObject {
         return try? await client.auth.session.accessToken
     }
 
+    // MARK: - Realtime (Chat)
+    // Placeholder storage if/when using Realtime channels
+    private var chatChannelKeys: Set<String> = []
+
+    /// Subscribe to realtime inserts on messages table between current user and partner.
+    /// Calls `onInsert` on main thread with the decoded DBMessage.
+    func subscribeToChat(partnerId: String, onInsert: @escaping (DBMessage) -> Void) async {
+        // TODO: Implement Realtime subscription with supabase-swift once API shape is confirmed.
+        // Keep a key so we don't re-subscribe per view refresh.
+        chatChannelKeys.insert(partnerId)
+        _ = onInsert // placeholder to silence unused warning until implemented
+    }
+
+    func unsubscribeChat(partnerId: String) async {
+        chatChannelKeys.remove(partnerId)
+    }
+
+    // Helper to decode Postgres change payload across supabase-swift versions
+    private static func decodeChange(_ payload: Any) -> DBMessage? {
+        // Try to access common keys like `new` or `record` via reflection
+        let mirror = Mirror(reflecting: payload)
+        for child in mirror.children {
+            if child.label == "new" || child.label == "record" {
+                if let dict = child.value as? [String: Any] {
+                    if let data = try? JSONSerialization.data(withJSONObject: dict),
+                       let msg = try? JSONDecoder().decode(DBMessage.self, from: data) {
+                        return msg
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
     struct PresignRequest: Encodable {
         let fileName: String
         let fileType: String
