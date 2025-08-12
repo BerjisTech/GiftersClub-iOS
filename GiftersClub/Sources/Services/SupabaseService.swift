@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Supabase
+import Realtime
 
 final class SupabaseManager: ObservableObject {
     static let shared = SupabaseManager()
@@ -869,37 +870,42 @@ final class SupabaseManager: ObservableObject {
     }
 
     // MARK: - Realtime (Chat)
-    // Placeholder storage if/when using Realtime channels
-    private var chatChannelKeys: Set<String> = []
+    // Store active realtime channels by partnerId
+    private var chatChannels: [String: RealtimeChannelV2] = [:]
 
     /// Subscribe to realtime inserts on messages table between current user and partner.
     /// Calls `onInsert` on main thread with the decoded DBMessage.
     func subscribeToChat(partnerId: String, onInsert: @escaping (DBMessage) -> Void) async {
-        // TODO: Implement Realtime subscription with supabase-swift once API shape is confirmed.
-        // Keep a key so we don't re-subscribe per view refresh.
-        chatChannelKeys.insert(partnerId)
-        _ = onInsert // placeholder to silence unused warning until implemented
+        guard let me = user?.id.uuidString else { return }
+        if chatChannels[partnerId] != nil { return }
+        let ch = client.channel("chat-\(me.prefix(6))-\(partnerId.prefix(6))")
+        // Listen to my outgoing messages to this partner
+        _ = ch.onPostgresChange(InsertAction.self, schema: "public", table: "messages", filter: "sender_id=eq.\(me)") { action in
+            let rec = action.record
+            guard let recv = rec["receiver_id"] as? String, recv == partnerId else { return }
+            if let msg = Self.decodeRecord(rec) { DispatchQueue.main.async { onInsert(msg) } }
+        }
+        // Listen to partner's outgoing messages to me
+        _ = ch.onPostgresChange(InsertAction.self, schema: "public", table: "messages", filter: "sender_id=eq.\(partnerId)") { action in
+            let rec = action.record
+            guard let recv = rec["receiver_id"] as? String, recv == me else { return }
+            if let msg = Self.decodeRecord(rec) { DispatchQueue.main.async { onInsert(msg) } }
+        }
+        do { try await ch.subscribeWithError() } catch { return }
+        chatChannels[partnerId] = ch
     }
 
     func unsubscribeChat(partnerId: String) async {
-        chatChannelKeys.remove(partnerId)
+        if let ch = chatChannels.removeValue(forKey: partnerId) {
+            await ch.unsubscribe()
+            await client.removeChannel(ch)
+        }
     }
 
     // Helper to decode Postgres change payload across supabase-swift versions
-    private static func decodeChange(_ payload: Any) -> DBMessage? {
-        // Try to access common keys like `new` or `record` via reflection
-        let mirror = Mirror(reflecting: payload)
-        for child in mirror.children {
-            if child.label == "new" || child.label == "record" {
-                if let dict = child.value as? [String: Any] {
-                    if let data = try? JSONSerialization.data(withJSONObject: dict),
-                       let msg = try? JSONDecoder().decode(DBMessage.self, from: data) {
-                        return msg
-                    }
-                }
-            }
-        }
-        return nil
+    private static func decodeRecord(_ record: [String: Any]) -> DBMessage? {
+        guard let data = try? JSONSerialization.data(withJSONObject: record) else { return nil }
+        return try? JSONDecoder().decode(DBMessage.self, from: data)
     }
 
     struct PresignRequest: Encodable {
