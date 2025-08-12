@@ -16,34 +16,28 @@ struct ChatDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
-                List(messages) { msg in
-                    // Build the full message content stack: bubble, media, time
-                    let content = VStack(alignment: .leading, spacing: 6) {
-                        if !msg.text.isEmpty { Bubble(text: msg.text, fromMe: msg.fromMe) }
-                        if let atts = msg.attachments, !atts.isEmpty { AttachmentsGrid(attachments: atts) }
-                        HStack {
-                            if msg.fromMe { Spacer(minLength: 0) }
-                            Text(msg.time)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            if !msg.fromMe { Spacer(minLength: 0) }
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(messages) { msg in
+                            // Build the full message content stack: bubble, media, time
+                            VStack(alignment: .leading, spacing: 6) {
+                                if !msg.text.isEmpty { Bubble(text: msg.text, fromMe: msg.fromMe) }
+                                if let atts = msg.attachments, !atts.isEmpty { AttachmentsGrid(attachments: atts) }
+                                HStack {
+                                    if msg.fromMe { Spacer(minLength: 0) }
+                                    Text(msg.time)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    if !msg.fromMe { Spacer(minLength: 0) }
+                                }
+                            }
+                            // Align entire message row (text + media + time) to side using frame alignment
+                            .frame(maxWidth: .infinity, alignment: msg.fromMe ? .trailing : .leading)
+                            .id(msg.id)
+                            .padding(.horizontal, 12)
                         }
                     }
-
-                    // Align entire message row (text + media + time) to side using HStack + Spacer
-                    Group {
-                        if msg.fromMe {
-                            HStack(alignment: .top, spacing: 0) { Spacer(minLength: 0); content }
-                        } else {
-                            HStack(alignment: .top, spacing: 0) { content; Spacer(minLength: 0) }
-                        }
-                    }
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                    .id(msg.id)
                 }
-                .listStyle(.plain)
-                .transaction { t in t.animation = nil }
                 .onChange(of: messages.last?.id) { _, last in
                     if let last { withAnimation { proxy.scrollTo(last, anchor: .bottom) } }
                 }
