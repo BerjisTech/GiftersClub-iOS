@@ -57,7 +57,33 @@ struct ChatListView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Chats")
-            .task { await load() }
+            .task {
+                await load()
+                await supabase.subscribeToAllChats { msg in
+                    Task { @MainActor in
+                        guard let me = supabase.user?.id.uuidString else { return }
+                        let partnerId = (msg.sender_id == me) ? msg.receiver_id : msg.sender_id
+                        if let idx = conversations.firstIndex(where: { $0.partner.userId == partnerId }) {
+                            let existing = conversations[idx]
+                            let preview = Self.previewText(content: msg.content, attachments: msg.attachments)
+                            let time = Self.relativeTime(fromISO: msg.created_at)
+                            let unread = (msg.sender_id == me) ? existing.unreadCount : (existing.unreadCount + 1)
+                            let updated = ConversationItem(
+                                id: existing.id,
+                                partner: existing.partner,
+                                lastMessagePreview: preview,
+                                lastMessageTime: time,
+                                unreadCount: unread
+                            )
+                            conversations.remove(at: idx)
+                            conversations.insert(updated, at: 0)
+                        } else {
+                            await loadConversations()
+                        }
+                    }
+                }
+            }
+            .onDisappear { Task { await supabase.unsubscribeAllChats() } }
             .refreshable { await load() }
         }
     }

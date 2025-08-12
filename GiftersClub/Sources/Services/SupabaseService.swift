@@ -872,6 +872,7 @@ final class SupabaseManager: ObservableObject {
     // MARK: - Realtime (Chat)
     // Store active realtime channels by partnerId
     private var chatChannels: [String: RealtimeChannelV2] = [:]
+    private var chatIndexChannel: RealtimeChannelV2?
 
     /// Subscribe to realtime inserts on messages table between current user and partner.
     /// Calls `onInsert` on main thread with the decoded DBMessage.
@@ -899,6 +900,35 @@ final class SupabaseManager: ObservableObject {
         if let ch = chatChannels.removeValue(forKey: partnerId) {
             await ch.unsubscribe()
             await client.removeChannel(ch)
+        }
+    }
+
+    /// Subscribe to all messages involving the current user (for chat list updates).
+    func subscribeToAllChats(onInsert: @escaping (DBMessage) -> Void) async {
+        guard let me = user?.id.uuidString else { return }
+        if chatIndexChannel != nil { return }
+        let ch = client.channel("chat-index-\(me.prefix(6))")
+        // Listen for my outgoing messages (receiver can be anyone)
+        _ = ch.onPostgresChange(InsertAction.self, schema: "public", table: "messages", filter: "sender_id=eq.\(me)") { action in
+            if let msg = Self.decodeRecord(action.record) {
+                DispatchQueue.main.async { onInsert(msg) }
+            }
+        }
+        // Listen for incoming messages to me (from anyone)
+        _ = ch.onPostgresChange(InsertAction.self, schema: "public", table: "messages", filter: "receiver_id=eq.\(me)") { action in
+            if let msg = Self.decodeRecord(action.record) {
+                DispatchQueue.main.async { onInsert(msg) }
+            }
+        }
+        do { try await ch.subscribeWithError() } catch { return }
+        chatIndexChannel = ch
+    }
+
+    func unsubscribeAllChats() async {
+        if let ch = chatIndexChannel {
+            await ch.unsubscribe()
+            await client.removeChannel(ch)
+            chatIndexChannel = nil
         }
     }
 
