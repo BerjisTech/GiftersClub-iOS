@@ -82,7 +82,7 @@ struct ChatListView: View {
                         displayName: d.partner_name ?? "",
                         imageURL: d.partner_image.flatMap(URL.init(string:))
                     ),
-                    lastMessagePreview: d.last_message_content ?? "",
+                    lastMessagePreview: Self.previewText(content: d.last_message_content, attachments: d.last_message_attachments),
                     lastMessageTime: Self.relativeTime(fromISO: d.last_message_at),
                     unreadCount: d.unread_count
                 )
@@ -125,6 +125,16 @@ struct ChatListView: View {
         let m = seconds/60; if m < 60 { return "\(m)m" }
         let h = m/60; if h < 24 { return "\(h)h" }
         let d = h/24; return "\(d)d"
+    }
+
+    private static func previewText(content: String?, attachments: [SupabaseManager.DBAttachment]?) -> String {
+        if let c = content, !c.isEmpty { return c }
+        if let a = attachments?.first {
+            let t = (a.type ?? "image").lowercased()
+            if t == "image" { return "[PHOTO]" }
+            if t == "video" { return "[VIDEO]" }
+        }
+        return ""
     }
 }
 

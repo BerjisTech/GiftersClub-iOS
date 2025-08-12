@@ -802,6 +802,37 @@ final class SupabaseManager: ObservableObject {
         return res.value
     }
 
+    // MARK: - Lightweight In-Memory Cache (Chat)
+    private var messagesCache: [String: [DBMessage]] = [:] // partnerId -> messages ordered asc
+    private let cacheQueue = DispatchQueue(label: "chat-cache-queue")
+
+    /// Return cached messages for a partner (if any), ordered ascending by created_at.
+    func cachedMessages(partnerId: String) -> [DBMessage] {
+        cacheQueue.sync { messagesCache[partnerId] ?? [] }
+    }
+
+    /// Fetch only new messages since the last cached item, merge, and return the full ordered list.
+    @MainActor
+    func syncMessages(partnerId: String) async -> [DBMessage] {
+        let since: String? = cacheQueue.sync {
+            messagesCache[partnerId]?.last?.created_at
+        }
+        do {
+            let delta = try await fetchMessages(partnerId: partnerId, orderAsc: true, sinceISO: since)
+            if delta.isEmpty { return cachedMessages(partnerId: partnerId) }
+            // Merge + de-dupe by id
+            var merged = cacheQueue.sync { messagesCache[partnerId] ?? [] }
+            var seen = Set(merged.map { $0.id })
+            for m in delta where !seen.contains(m.id) { merged.append(m); seen.insert(m.id) }
+            // Ensure ascending order
+            merged.sort { $0.created_at < $1.created_at }
+            cacheQueue.sync { messagesCache[partnerId] = merged }
+            return merged
+        } catch {
+            return cachedMessages(partnerId: partnerId)
+        }
+    }
+
     func markMessagesAsRead(partnerId: String, readAtISO: String = ISO8601DateFormatter().string(from: Date())) async throws {
         let me = try await resolvedUserId(explicit: nil)
         struct Patch: Encodable { let read_at: String }
@@ -845,33 +876,44 @@ final class SupabaseManager: ObservableObject {
     }
     struct PresignResponse: Decodable { let uploadUrl: String; let publicUrl: String }
 
-    /// Upload avatar bytes to S3 via Supabase Edge Function and return the public URL
-    func uploadAvatar(imageData: Data, mimeType: String = "image/jpeg") async throws -> String {
-        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
-        let filename = "profile-\(me).jpg"
-        // Call Edge Function to get presigned URL
+    /// Generic media upload via Supabase Edge Function; returns a public URL
+    func uploadMedia(bytes: Data, fileName: String, mimeType: String, bucket: String) async throws -> String {
         let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/upload-media")
         var req = URLRequest(url: functionURL)
         req.httpMethod = "POST"
         req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
-        if let token = await currentAccessToken() {
-            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
+        if let token = await currentAccessToken() { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body = PresignRequest(fileName: filename, fileType: mimeType, bucket: "profile", overwrite: true)
+        let body = PresignRequest(fileName: fileName, fileType: mimeType, bucket: bucket, overwrite: false)
         req.httpBody = try JSONEncoder().encode(body)
         let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
         let presign = try JSONDecoder().decode(PresignResponse.self, from: data)
-        // PUT to S3
         guard let uploadURL = URL(string: presign.uploadUrl) else { throw URLError(.badURL) }
-        var put = URLRequest(url: uploadURL)
-        put.httpMethod = "PUT"
-        put.addValue(mimeType, forHTTPHeaderField: "Content-Type")
-        let _ = try await URLSession.shared.upload(for: put, from: imageData)
+        var put = URLRequest(url: uploadURL); put.httpMethod = "PUT"; put.addValue(mimeType, forHTTPHeaderField: "Content-Type")
+        let _ = try await URLSession.shared.upload(for: put, from: bytes)
         return presign.publicUrl
+    }
+
+    /// Upload avatar bytes to S3 via Supabase Edge Function and return the public URL
+    func uploadAvatar(imageData: Data, mimeType: String = "image/jpeg") async throws -> String {
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        let filename = "profile-\(me).jpg"
+        return try await uploadMedia(bytes: imageData, fileName: filename, mimeType: mimeType, bucket: "profile")
+    }
+
+    // MARK: - Chat Send with Attachments
+    struct MessageAttachment: Encodable { let url: String; let type: String }
+    struct InsertMessageWithAttachments: Encodable { let sender_id: String; let receiver_id: String; let content: String; let attachments: [MessageAttachment] }
+    func sendMessage(to partnerId: String, content: String, attachments: [MessageAttachment]) async throws -> DBMessage? {
+        let me = try await resolvedUserId(explicit: nil)
+        let payload = InsertMessageWithAttachments(sender_id: me, receiver_id: partnerId, content: content, attachments: attachments)
+        let res: PostgrestResponse<[DBMessage]> = try await client
+            .from("messages")
+            .insert([payload])
+            .select("id,sender_id,receiver_id,content,created_at,attachments")
+            .execute()
+        return res.value.first
     }
 
     // MARK: - Security (Block/Unblock)
