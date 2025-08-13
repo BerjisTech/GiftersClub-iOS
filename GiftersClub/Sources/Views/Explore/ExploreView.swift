@@ -227,10 +227,21 @@ private struct ExplorePostsGrid: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(posts, id: \.id) { p in
-                    ExplorePostCard(post: p)
-                        .frame(height: 200)
-                        .contentShape(Rectangle())
-                        .onTapGesture { onSelect(p) }
+                    let media: LockablePostCard.MediaKind? = {
+                        if let first = p.media?.first, let u = first.url, let url = URL(string: u) {
+                            return (first.media_type == "video") ? .video(url) : .image(url)
+                        }
+                        return nil
+                    }()
+                    LockablePostCard(
+                        postId: p.id,
+                        authorUserId: p.user_id,
+                        accessType: p.access_type,
+                        price: p.price,
+                        media: media,
+                        isLong: false,
+                        onTapUnlocked: { onSelect(p) }
+                    )
                 }
             }
             .padding(.horizontal)

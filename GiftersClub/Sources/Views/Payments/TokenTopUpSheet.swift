@@ -10,7 +10,11 @@ struct TokenTopUpSheet: View {
     @State private var isProcessing = false
 
     var body: some View {
-        NavigationStack {
+        
+     private var errorText: String? = nil
+    var onCompleted: ((Bool) -> Void)? = nil
+
+    NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Top up tokens").font(.headline)
                 Picker("Amount", selection: $amount) {
@@ -27,9 +31,12 @@ struct TokenTopUpSheet: View {
             }
             .padding()
             .navigationTitle("Buy Tokens")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { onCompleted?(false); dismiss() } } }
         }
         .presentationDetents([.fraction(0.35), .medium])
+        .alert("Payment Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(errorText ?? "") }
     }
 
     private func purchase() async {
@@ -39,7 +46,8 @@ struct TokenTopUpSheet: View {
         #if canImport(FlutterwaveSDK)
         // Ensure a public key is configured
         if SupabaseConfig.flutterwavePublicKey.isEmpty {
-            // Abort if no key; do NOT credit tokens
+            await MainActor.run { errorText = "Payment unavailable. Please try again later." }
+            await MainActor.run { isProcessing = false }
             return
         }
         let txRef = "ios_topup_\(me)_\(amount)_\(Int(Date().timeIntervalSince1970))"
@@ -47,16 +55,16 @@ struct TokenTopUpSheet: View {
             // Invoke Flutterwave payment UI
             let success = try await PaymentCoordinator.shared.presentFlutterwaveTopUp(publicKey: SupabaseConfig.flutterwavePublicKey, amount: amount, txRef: txRef)
             if success {
-                // Only after SDK returns success, credit tokens via Edge Function
                 try await supabase.processPurchaseTokens(userId: me, tokens: amount, txRef: txRef)
-                await MainActor.run { dismiss() }
+                await MainActor.run { onCompleted?(true); dismiss() }
+            }
             }
         } catch {
             // Payment failed or cancelled — do not credit tokens
+            await MainActor.run { errorText = "Payment failed or cancelled." }
         }
         #else
-        // Flutterwave SDK not available; do NOT credit tokens.
-        // You must add the iOS-v3 Flutterwave SDK to enable top-ups.
+        await MainActor.run { errorText = "Payment unavailable. Please install Flutterwave SDK." }
         #endif
         await MainActor.run { isProcessing = false }
     }

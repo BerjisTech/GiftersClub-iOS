@@ -408,24 +408,20 @@ private struct PostsGrid2View: View {
         } else {
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(posts, id: \.id) { p in
-                    ZStack(alignment: .topTrailing) {
+                    let media: LockablePostCard.MediaKind? = {
                         if let first = p.media?.first, let u = first.url, let url = URL(string: u) {
-                            AsyncImage(url: url) { img in
-                                img.resizable().scaledToFill()
-                                    .blur(radius: ((p.access_type ?? "free") == "free" || unlocked.contains(p.id)) ? 0 : 12)
-                            } placeholder: { ShimmerView() }
-                        } else {
-                            RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06))
+                            return (first.media_type == "video") ? .video(url) : .image(url)
                         }
-                        if let t = p.access_type, t != "free", !unlocked.contains(p.id) {
-                            RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35))
-                            Image(systemName: "lock.fill").foregroundStyle(.white).padding(6)
-                        }
-                    }
-                    .frame(height: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .contentShape(Rectangle())
-                    .onTapGesture { Task { await handleTap(p) } }
+                        return nil
+                    }()
+                    LockablePostCard(
+                        postId: p.id,
+                        authorUserId: p.user_id,
+                        accessType: p.access_type,
+                        price: p.price,
+                        media: media,
+                        isLong: true
+                    )
                 }
             }
             .sheet(item: $paywallPost) { pp in
@@ -438,19 +434,7 @@ private struct PostsGrid2View: View {
             .padding(.vertical, 8)
         }
     }
-    private func handleTap(_ p: SupabaseManager.UserPostMinimal) async {
-        let type = p.access_type ?? "free"
-        guard type != "free" else { return }
-        do {
-            if type == "paid" {
-                let has = try await supabase.hasPostAccess(postId: p.id)
-                if !has { paywallPost = p } else { unlocked.insert(p.id) }
-            } else if type == "subscription" {
-                let has = try await supabase.hasSubscription(to: p.user_id)
-                if !has { paywallPost = p } else { unlocked.insert(p.id) }
-            }
-        } catch { paywallPost = p }
-    }
+    private func handleTap(_ p: SupabaseManager.UserPostMinimal) async {}
 }
 
 private struct WishlistsListView: View {

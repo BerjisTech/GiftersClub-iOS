@@ -8,7 +8,7 @@ struct PaywallSheet: View {
     @State private var showTopUp = false
     @State private var duration: SupabaseManager.SubscriptionDuration = .monthly
     @State private var isLoading = false
-    @State private var shouldRetryAfterTopUp = false
+    @State private var topUpSucceeded = false
     var onUnlocked: (() -> Void)? = nil
     @State private var errorText: String? = nil
 
@@ -35,7 +35,11 @@ struct PaywallSheet: View {
             .navigationTitle("Locked Content")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
         }
-        .sheet(isPresented: $showTopUp, onDismiss: { maybeRetryAfterTopUp() }) { TokenTopUpSheet() }
+        .sheet(isPresented: $showTopUp, onDismiss: {
+            if topUpSucceeded { Task { await doPurchase() }; topUpSucceeded = false } else { isLoading = false }
+        }) {
+            TokenTopUpSheet(onCompleted: { success in topUpSucceeded = success })
+        }
         .presentationDetents([.fraction(0.45), .medium])
         .alert("Payment Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
@@ -60,7 +64,7 @@ struct PaywallSheet: View {
         do {
             // Check local balance first
             if let me = supabase.user?.id.uuidString, let prof = try? await supabase.fetchProfile(username: nil, userId: me), (prof.token_balance ?? 0) < price {
-                await MainActor.run { shouldRetryAfterTopUp = true; showTopUp = true }
+                await MainActor.run { isLoading = false; topUpSucceeded = false; showTopUp = true }
                 return
             }
             try await supabase.purchasePostAccess(postId: postId, tokens: price)
@@ -69,10 +73,5 @@ struct PaywallSheet: View {
             await MainActor.run { errorText = "Purchase failed. Please try again." }
         }
     }
-    // Retry after top-up closes
-    private func maybeRetryAfterTopUp() {
-        guard shouldRetryAfterTopUp else { return }
-        shouldRetryAfterTopUp = false
-        Task { await doPurchase() }
-    }
+    // retry handled in onDismiss
 }
