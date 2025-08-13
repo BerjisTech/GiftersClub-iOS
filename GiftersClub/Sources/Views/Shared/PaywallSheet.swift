@@ -70,7 +70,12 @@ struct PaywallSheet: View {
             try await supabase.purchasePostAccess(postId: postId, tokens: price)
             await MainActor.run { onUnlocked?(); dismiss() }
         } catch {
-            await MainActor.run { errorText = "Purchase failed. Please try again." }
+            let msg = (error as NSError).userInfo[NSLocalizedDescriptionKey] as? String ?? error.localizedDescription
+            if msg.lowercased().contains("insufficient") && msg.lowercased().contains("token") {
+                await MainActor.run { isLoading = false; topUpSucceeded = false; showTopUp = true }
+            } else {
+                await MainActor.run { errorText = msg.isEmpty ? "Purchase failed. Please try again." : msg }
+            }
         }
     }
     // retry handled in onDismiss

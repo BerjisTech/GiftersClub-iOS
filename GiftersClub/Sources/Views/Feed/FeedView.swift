@@ -29,6 +29,7 @@ struct HomeView: View {
     @ObservedObject private var commentsPresenter = CommentsPresenter.shared
     @State private var tabBarHeight: CGFloat = 0
     @State private var sharePost: FeedPost? = nil
+    @State private var isLoadingMore = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -58,6 +59,12 @@ struct HomeView: View {
             guard let id = note.object as? String, let p = posts.first(where: { $0.id == id }) else { return }
             sharePost = p
         }
+        .onChange(of: selection) { _, newIndex in
+            // Load more when near the end
+            if newIndex >= posts.count - 3 {
+                Task { await loadMoreIfNeeded() }
+            }
+        }
     }
 
     private func initialLoad() async { await refresh() }
@@ -80,6 +87,23 @@ struct HomeView: View {
             }
         } catch {
             // Keep old posts on failure
+        }
+    }
+
+    private func loadMoreIfNeeded() async {
+        guard !isLoadingMore else { return }
+        await MainActor.run { isLoadingMore = true }
+        defer { Task { await MainActor.run { isLoadingMore = false } } }
+        do {
+            let rows = try await supabase.fetchFeed(limit: 10, offset: offset)
+            var mapped = rows.compactMap(mapRow)
+            if mapped.isEmpty { return }
+            await MainActor.run {
+                posts.append(contentsOf: mapped)
+                offset += mapped.count
+            }
+        } catch {
+            // ignore
         }
     }
 

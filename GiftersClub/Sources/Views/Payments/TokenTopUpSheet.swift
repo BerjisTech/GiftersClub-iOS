@@ -8,13 +8,11 @@ struct TokenTopUpSheet: View {
     @ObservedObject private var supabase = SupabaseManager.shared
     @State private var amount: Int = 100
     @State private var isProcessing = false
-
-    var body: some View {
-        
-     private var errorText: String? = nil
+    @State private var errorText: String? = nil
     var onCompleted: ((Bool) -> Void)? = nil
 
-    NavigationStack {
+    var body: some View {
+        NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Top up tokens").font(.headline)
                 Picker("Amount", selection: $amount) {
@@ -42,25 +40,21 @@ struct TokenTopUpSheet: View {
     private func purchase() async {
         guard let me = supabase.user?.id.uuidString else { return }
         await MainActor.run { isProcessing = true }
-
         #if canImport(FlutterwaveSDK)
-        // Ensure a public key is configured
         if SupabaseConfig.flutterwavePublicKey.isEmpty {
-            await MainActor.run { errorText = "Payment unavailable. Please try again later." }
-            await MainActor.run { isProcessing = false }
+            await MainActor.run { errorText = "Payment unavailable. Please try again later."; isProcessing = false }
             return
         }
         let txRef = "ios_topup_\(me)_\(amount)_\(Int(Date().timeIntervalSince1970))"
         do {
-            // Invoke Flutterwave payment UI
             let success = try await PaymentCoordinator.shared.presentFlutterwaveTopUp(publicKey: SupabaseConfig.flutterwavePublicKey, amount: amount, txRef: txRef)
             if success {
                 try await supabase.processPurchaseTokens(userId: me, tokens: amount, txRef: txRef)
                 await MainActor.run { onCompleted?(true); dismiss() }
-            }
+            } else {
+                await MainActor.run { errorText = "Payment failed or cancelled." }
             }
         } catch {
-            // Payment failed or cancelled — do not credit tokens
             await MainActor.run { errorText = "Payment failed or cancelled." }
         }
         #else

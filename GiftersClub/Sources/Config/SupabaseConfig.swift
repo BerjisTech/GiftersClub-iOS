@@ -7,6 +7,10 @@ enum SupabaseConfig {
     static let redirectURL = URL(string: "gifterclub://login-callback")!
     // Base URL for web app where static assets (like gifts images) are hosted
     static let webBase = URL(string: "https://gifter.club")!
-    // Flutterwave public key (set to your live or test key)
-    static let flutterwavePublicKey = "" // TODO: fill with your public key
+    // Flutterwave public key from Angular/Kotlin
+    #if DEBUG
+    static let flutterwavePublicKey = "FLWPUBK_TEST-d9ddd8396154af47423b8e55dc5c1f69-X"
+    #else
+    static let flutterwavePublicKey = "FLWPUBK-23f4ab7e7dfd648de9c957acd063b30d-X"
+    #endif
 }
