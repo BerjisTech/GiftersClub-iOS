@@ -400,6 +400,7 @@ private struct PostsGrid2View: View {
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
     @ObservedObject private var supabase = SupabaseManager.shared
     @State private var paywallPost: SupabaseManager.UserPostMinimal? = nil
+    @State private var unlocked: Set<String> = []
     var body: some View {
         if posts.isEmpty {
             VStack(spacing: 8) { Text("No posts yet").foregroundStyle(.secondary) }
@@ -411,12 +412,12 @@ private struct PostsGrid2View: View {
                         if let first = p.media?.first, let u = first.url, let url = URL(string: u) {
                             AsyncImage(url: url) { img in
                                 img.resizable().scaledToFill()
-                                    .blur(radius: (p.access_type ?? "free") == "free" ? 0 : 12)
+                                    .blur(radius: ((p.access_type ?? "free") == "free" || unlocked.contains(p.id)) ? 0 : 12)
                             } placeholder: { ShimmerView() }
                         } else {
                             RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06))
                         }
-                        if let t = p.access_type, t != "free" {
+                        if let t = p.access_type, t != "free", !unlocked.contains(p.id) {
                             RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35))
                             Image(systemName: "lock.fill").foregroundStyle(.white).padding(6)
                         }
@@ -429,9 +430,9 @@ private struct PostsGrid2View: View {
             }
             .sheet(item: $paywallPost) { pp in
                 if pp.access_type == "subscription" {
-                    PaywallSheet(mode: .subscription(creatorId: pp.user_id))
+                    PaywallSheet(mode: .subscription(creatorId: pp.user_id), onUnlocked: { unlocked.insert(pp.id) })
                 } else if pp.access_type == "paid" {
-                    PaywallSheet(mode: .paid(postId: pp.id, price: pp.price ?? 0))
+                    PaywallSheet(mode: .paid(postId: pp.id, price: pp.price ?? 0), onUnlocked: { unlocked.insert(pp.id) })
                 }
             }
             .padding(.vertical, 8)
@@ -443,10 +444,10 @@ private struct PostsGrid2View: View {
         do {
             if type == "paid" {
                 let has = try await supabase.hasPostAccess(postId: p.id)
-                if !has { paywallPost = p }
+                if !has { paywallPost = p } else { unlocked.insert(p.id) }
             } else if type == "subscription" {
                 let has = try await supabase.hasSubscription(to: p.user_id)
-                if !has { paywallPost = p }
+                if !has { paywallPost = p } else { unlocked.insert(p.id) }
             }
         } catch { paywallPost = p }
     }

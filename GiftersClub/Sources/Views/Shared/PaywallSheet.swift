@@ -8,6 +8,9 @@ struct PaywallSheet: View {
     @State private var showTopUp = false
     @State private var duration: SupabaseManager.SubscriptionDuration = .monthly
     @State private var isLoading = false
+    @State private var shouldRetryAfterTopUp = false
+    var onUnlocked: (() -> Void)? = nil
+    @State private var errorText: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -32,21 +35,44 @@ struct PaywallSheet: View {
             .navigationTitle("Locked Content")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
         }
-        .sheet(isPresented: $showTopUp) { TokenTopUpSheet() }
+        .sheet(isPresented: $showTopUp, onDismiss: { maybeRetryAfterTopUp() }) { TokenTopUpSheet() }
         .presentationDetents([.fraction(0.45), .medium])
+        .alert("Payment Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(errorText ?? "") }
     }
 
     private func doSubscribe() async {
         guard case let .subscription(creatorId) = mode else { return }
         await MainActor.run { isLoading = true }
         defer { Task { await MainActor.run { isLoading = false } } }
-        do { try await supabase.subscribeToCreator(creatorId: creatorId, tokens: 0, duration: duration); await MainActor.run { dismiss() } } catch {}
+        do {
+            try await supabase.subscribeToCreator(creatorId: creatorId, tokens: 0, duration: duration)
+            await MainActor.run { onUnlocked?(); dismiss() }
+        } catch {
+            await MainActor.run { errorText = "Subscription failed. Please try again." }
+        }
     }
     private func doPurchase() async {
         guard case let .paid(postId, price) = mode else { return }
         await MainActor.run { isLoading = true }
         defer { Task { await MainActor.run { isLoading = false } } }
-        do { try await supabase.purchasePostAccess(postId: postId, tokens: price); await MainActor.run { dismiss() } } catch {}
+        do {
+            // Check local balance first
+            if let me = supabase.user?.id.uuidString, let prof = try? await supabase.fetchProfile(username: nil, userId: me), (prof.token_balance ?? 0) < price {
+                await MainActor.run { shouldRetryAfterTopUp = true; showTopUp = true }
+                return
+            }
+            try await supabase.purchasePostAccess(postId: postId, tokens: price)
+            await MainActor.run { onUnlocked?(); dismiss() }
+        } catch {
+            await MainActor.run { errorText = "Purchase failed. Please try again." }
+        }
+    }
+    // Retry after top-up closes
+    private func maybeRetryAfterTopUp() {
+        guard shouldRetryAfterTopUp else { return }
+        shouldRetryAfterTopUp = false
+        Task { await doPurchase() }
     }
 }
-

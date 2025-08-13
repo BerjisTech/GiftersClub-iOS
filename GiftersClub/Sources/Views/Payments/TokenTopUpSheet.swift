@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(FlutterwaveSDK)
+import FlutterwaveSDK
+#endif
 
 struct TokenTopUpSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -32,15 +35,29 @@ struct TokenTopUpSheet: View {
     private func purchase() async {
         guard let me = supabase.user?.id.uuidString else { return }
         await MainActor.run { isProcessing = true }
-        defer { Task { await MainActor.run { isProcessing = false } } }
-        do {
-            // TODO: Present Flutterwave payment UI and confirm success before crediting tokens.
-            // For now, call Edge Function directly to credit (dev/test flow).
-            try await supabase.processPurchaseTokens(userId: me, tokens: amount, txRef: "ios_topup_\(Int(Date().timeIntervalSince1970))")
-            await MainActor.run { dismiss() }
-        } catch {
-            // handle error
+
+        #if canImport(FlutterwaveSDK)
+        // Ensure a public key is configured
+        if SupabaseConfig.flutterwavePublicKey.isEmpty {
+            // Abort if no key; do NOT credit tokens
+            return
         }
+        let txRef = "ios_topup_\(me)_\(amount)_\(Int(Date().timeIntervalSince1970))"
+        do {
+            // Invoke Flutterwave payment UI
+            let success = try await PaymentCoordinator.shared.presentFlutterwaveTopUp(publicKey: SupabaseConfig.flutterwavePublicKey, amount: amount, txRef: txRef)
+            if success {
+                // Only after SDK returns success, credit tokens via Edge Function
+                try await supabase.processPurchaseTokens(userId: me, tokens: amount, txRef: txRef)
+                await MainActor.run { dismiss() }
+            }
+        } catch {
+            // Payment failed or cancelled — do not credit tokens
+        }
+        #else
+        // Flutterwave SDK not available; do NOT credit tokens.
+        // You must add the iOS-v3 Flutterwave SDK to enable top-ups.
+        #endif
+        await MainActor.run { isProcessing = false }
     }
 }
-

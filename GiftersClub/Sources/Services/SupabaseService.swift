@@ -200,7 +200,7 @@ final class SupabaseManager: ObservableObject {
         guard let me = user?.id.uuidString else { return false }
         struct Row: Decodable { let id: String }
         let res: PostgrestResponse<[Row]> = try await client
-            .from("post_accesses")
+            .from("post_access")
             .select("id")
             .eq("post_id", value: postId)
             .eq("user_id", value: me)
@@ -229,8 +229,11 @@ final class SupabaseManager: ObservableObject {
             "txRef": txRef
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (_, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw NSError(domain: "Subscribe", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg ?? "Subscription failed"])
+        }
     }
 
     func purchasePostAccess(postId: String, tokens: Int) async throws {
@@ -251,8 +254,11 @@ final class SupabaseManager: ObservableObject {
             "txRef": txRef
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (_, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw NSError(domain: "Purchase", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg ?? "Purchase failed"])
+        }
     }
 
     // MARK: - Explore Search RPC
