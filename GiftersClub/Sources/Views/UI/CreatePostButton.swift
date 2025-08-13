@@ -24,23 +24,4 @@ struct CreatePostButton: View {
     }
 }
 
-struct CreatePostSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var text: String = ""
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Create Post").font(.title3.weight(.semibold))
-                TextEditor(text: $text)
-                    .frame(minHeight: 180)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.1)))
-                Spacer()
-                GradientButton(title: "Post") { dismiss() }
-            }
-            .padding()
-            .navigationTitle("")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
-        }
-        .presentationDetents([.medium, .large])
-    }
-}
+// The real CreatePostSheet implementation lives in Views/CreatePost/CreatePostSheet.swift

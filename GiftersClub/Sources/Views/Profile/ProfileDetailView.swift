@@ -31,7 +31,7 @@ struct ProfileDetailView: View {
     @State private var isLoading = true
     @State private var activeTab: ProfileTab = .posts
     @State private var giftsSort: GiftsSort = .newest
-    @State private var postThumbs: [URL] = []
+    @State private var postsMinimal: [SupabaseManager.UserPostMinimal] = []
     @State private var wishlists: [SupabaseManager.DBWishlist] = []
     @State private var gifts: [SupabaseManager.DBGift] = []
     @State private var showAccount = false
@@ -246,7 +246,7 @@ struct ProfileDetailView: View {
     private func tabContent() -> some View {
         switch activeTab {
         case .posts:
-            PostsGridView(thumbs: postThumbs)
+            PostsGrid2View(posts: postsMinimal)
                 .padding(.horizontal)
         case .wishlists:
             WishlistsListView(
@@ -351,7 +351,7 @@ struct ProfileDetailView: View {
             )
 
             // Load tab data for that profile
-            postThumbs = (try? await supabase.fetchUserPostThumbs(userId: db.user_id, limit: 20)) ?? []
+            postsMinimal = (try? await supabase.fetchUserPostsMinimal(userId: db.user_id, limit: 20)) ?? []
             wishlists = (try? await supabase.fetchWishlists(userId: db.user_id, limit: 20)) ?? []
             gifts = (try? await supabase.fetchGifts(sort: mapSort(giftsSort), limit: 40)) ?? []
         } catch {
@@ -392,6 +392,63 @@ private struct PostsGridView: View {
             }
             .padding(.vertical, 8)
         }
+    }
+}
+
+private struct PostsGrid2View: View {
+    let posts: [SupabaseManager.UserPostMinimal]
+    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
+    @ObservedObject private var supabase = SupabaseManager.shared
+    @State private var paywallPost: SupabaseManager.UserPostMinimal? = nil
+    var body: some View {
+        if posts.isEmpty {
+            VStack(spacing: 8) { Text("No posts yet").foregroundStyle(.secondary) }
+                .padding(.vertical, 16)
+        } else {
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(posts, id: \.id) { p in
+                    ZStack(alignment: .topTrailing) {
+                        if let first = p.media?.first, let u = first.url, let url = URL(string: u) {
+                            AsyncImage(url: url) { img in
+                                img.resizable().scaledToFill()
+                                    .blur(radius: (p.access_type ?? "free") == "free" ? 0 : 12)
+                            } placeholder: { ShimmerView() }
+                        } else {
+                            RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06))
+                        }
+                        if let t = p.access_type, t != "free" {
+                            RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35))
+                            Image(systemName: "lock.fill").foregroundStyle(.white).padding(6)
+                        }
+                    }
+                    .frame(height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .contentShape(Rectangle())
+                    .onTapGesture { Task { await handleTap(p) } }
+                }
+            }
+            .sheet(item: $paywallPost) { pp in
+                if pp.access_type == "subscription" {
+                    PaywallSheet(mode: .subscription(creatorId: pp.user_id))
+                } else if pp.access_type == "paid" {
+                    PaywallSheet(mode: .paid(postId: pp.id, price: pp.price ?? 0))
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+    private func handleTap(_ p: SupabaseManager.UserPostMinimal) async {
+        let type = p.access_type ?? "free"
+        guard type != "free" else { return }
+        do {
+            if type == "paid" {
+                let has = try await supabase.hasPostAccess(postId: p.id)
+                if !has { paywallPost = p }
+            } else if type == "subscription" {
+                let has = try await supabase.hasSubscription(to: p.user_id)
+                if !has { paywallPost = p }
+            }
+        } catch { paywallPost = p }
     }
 }
 

@@ -241,6 +241,8 @@ private struct ExplorePostsGrid: View {
 
 private struct ExplorePostCard: View {
     let post: SupabaseManager.ExplorePost
+    @ObservedObject private var supabase = SupabaseManager.shared
+    @State private var showPaywall = false
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             if let media = post.media, let first = media.first {
@@ -250,6 +252,7 @@ private struct ExplorePostCard: View {
                             img.resizable().scaledToFill()
                                 .frame(width: geo.size.width, height: geo.size.height)
                                 .clipped()
+                                .blur(radius: (post.access_type ?? "free") == "free" ? 0 : 12)
                         } placeholder: { Color(.secondarySystemBackground) }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -258,13 +261,39 @@ private struct ExplorePostCard: View {
                         VideoThumbnail(url: url)
                             .frame(width: geo.size.width, height: geo.size.height)
                             .clipped()
+                            .blur(radius: (post.access_type ?? "free") == "free" ? 0 : 12)
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(alignment: .center) { Image(systemName: "play.circle.fill").font(.system(size: 36)).foregroundStyle(.white) }
                 } else { Color(.secondarySystemBackground).clipShape(RoundedRectangle(cornerRadius: 12)) }
             } else { Color(.secondarySystemBackground).clipShape(RoundedRectangle(cornerRadius: 12)) }
             if let prof = post.profile { Text(prof.username ?? "").font(.caption).foregroundStyle(.white).padding(6) }
+            if let type = post.access_type, type != "free" {
+                RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35))
+                VStack { HStack { Spacer(); Image(systemName: "lock.fill").foregroundStyle(.white).padding(6) } ; Spacer() }
+            }
         }
+        .sheet(isPresented: $showPaywall) {
+            if post.access_type == "subscription" {
+                PaywallSheet(mode: .subscription(creatorId: post.user_id))
+            } else if post.access_type == "paid" {
+                PaywallSheet(mode: .paid(postId: post.id, price: post.price ?? 0))
+            }
+        }
+        .onTapGesture { Task { await handleTap() } }
+    }
+    private func handleTap() async {
+        let type = post.access_type ?? "free"
+        guard type != "free" else { return }
+        do {
+            if type == "paid" {
+                let has = try await supabase.hasPostAccess(postId: post.id)
+                if !has { showPaywall = true }
+            } else if type == "subscription" {
+                let has = try await supabase.hasSubscription(to: post.user_id)
+                if !has { showPaywall = true }
+            }
+        } catch { showPaywall = true }
     }
 }
 

@@ -159,6 +159,8 @@ final class SupabaseManager: ObservableObject {
         let id: String
         let user_id: String
         let content: String?
+        let access_type: String?
+        let price: Int?
         let created_at: String?
         let like_count: Int?
         let comment_count: Int?
@@ -177,11 +179,89 @@ final class SupabaseManager: ObservableObject {
         return res.value
     }
 
+    // MARK: - Access gating (subscriptions and pay-per-post)
+    func hasSubscription(to creatorId: String) async throws -> Bool {
+        guard let me = user?.id.uuidString else { return false }
+        // Active subscription: end_date is null or in the future
+        let now = ISO8601DateFormatter().string(from: Date())
+        struct Row: Decodable { let id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("subscriptions")
+            .select("id")
+            .eq("creator_id", value: creatorId)
+            .eq("subscriber_id", value: me)
+            .or("end_date.is.null,end_date.gt.\(now)")
+            .limit(1)
+            .execute()
+        return !res.value.isEmpty
+    }
+
+    func hasPostAccess(postId: String) async throws -> Bool {
+        guard let me = user?.id.uuidString else { return false }
+        struct Row: Decodable { let id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("post_accesses")
+            .select("id")
+            .eq("post_id", value: postId)
+            .eq("user_id", value: me)
+            .limit(1)
+            .execute()
+        return !res.value.isEmpty
+    }
+
+    enum SubscriptionDuration: String { case one_time, monthly, annual }
+    func subscribeToCreator(creatorId: String, tokens: Int, duration: SubscriptionDuration) async throws {
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/subscribe-creator")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let txRef = "sub_\(me)_\(creatorId)_\(Int(Date().timeIntervalSince1970))"
+        let payload: [String: Any] = [
+            "creatorId": creatorId,
+            "subscriberId": me,
+            "tokens": tokens,
+            "durationType": duration.rawValue,
+            "txRef": txRef
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+    }
+
+    func purchasePostAccess(postId: String, tokens: Int) async throws {
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/purchase-post-access")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let txRef = "post_\(me)_\(postId)_\(Int(Date().timeIntervalSince1970))"
+        let payload: [String: Any] = [
+            "postId": postId,
+            "userId": me,
+            "tokens": tokens,
+            "txRef": txRef
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+    }
+
     // MARK: - Explore Search RPC
     struct ExplorePost: Decodable, Identifiable, Hashable {
         let id: String
         let user_id: String
         let content: String?
+        let access_type: String?
+        let price: Int?
         let media: [FeedRPCMedia]?
         let profile: FeedRPCProfile?
         static func == (lhs: ExplorePost, rhs: ExplorePost) -> Bool { lhs.id == rhs.id }
@@ -264,6 +344,26 @@ final class SupabaseManager: ObservableObject {
             return lhs.value > rhs.value
         }.map { $0.key }
         return Array(sorted.prefix(limit))
+    }
+
+    // MARK: - Profile Posts (minimal for grid + access)
+    struct UserPostMinimal: Decodable, Identifiable {
+        let id: String
+        let user_id: String
+        let access_type: String?
+        let price: Int?
+        let media: [FeedRPCMedia]?
+    }
+
+    func fetchUserPostsMinimal(userId: String, limit: Int = 20) async throws -> [UserPostMinimal] {
+        let res: PostgrestResponse<[UserPostMinimal]> = try await client
+            .from("posts")
+            .select("id,user_id,access_type,price, media:post_media(url,media_type,order)")
+            .eq("user_id", value: userId)
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+        return res.value
     }
 
     func recordSearchQuery(_ q: String) async {
@@ -623,6 +723,37 @@ final class SupabaseManager: ObservableObject {
         return ids.compactMap { firstMap[$0] }
     }
 
+    // MARK: - Create Post (parity with Angular/Kotlin)
+    struct CreatePostInsert: Encodable {
+        let user_id: String
+        let content: String
+        let access_type: String
+        let price: Int?
+    }
+    struct DBPostRow: Decodable { let id: String; let user_id: String }
+    /// Create a new post row. Returns DBPostRow with id.
+    func createPost(content: String, accessType: String = "free", price: Int? = nil) async throws -> DBPostRow? {
+        let me = try await resolvedUserId(explicit: nil)
+        let payload = CreatePostInsert(user_id: me, content: content, access_type: accessType, price: price)
+        let res: PostgrestResponse<[DBPostRow]> = try await client
+            .from("posts")
+            .insert([payload])
+            .select("id,user_id")
+            .execute()
+        return res.value.first
+    }
+    struct PostMediaInsert: Encodable { let post_id: String; let media_type: String; let url: String; let order: Int }
+    /// Insert a post_media row after uploading to storage; returns inserted row
+    func insertPostMedia(postId: String, mediaType: String, url: String, order: Int) async throws -> DBPostMedia? {
+        let payload = PostMediaInsert(post_id: postId, media_type: mediaType, url: url, order: order)
+        let res: PostgrestResponse<[DBPostMedia]> = try await client
+            .from("post_media")
+            .insert([payload])
+            .select("post_id,url,order")
+            .execute()
+        return res.value.first
+    }
+
     // MARK: - Wishlists (basic)
     func fetchWishlists(userId: String, limit: Int = 20) async throws -> [DBWishlist] {
         let res: PostgrestResponse<[DBWishlist]> = try await client
@@ -883,14 +1014,16 @@ final class SupabaseManager: ObservableObject {
         // Listen to my outgoing messages to this partner
         _ = ch.onPostgresChange(InsertAction.self, schema: "public", table: "messages", filter: "sender_id=eq.\(me)") { action in
             let rec = action.record
-            guard let recv = rec["receiver_id"] as? String, recv == partnerId else { return }
-            if let msg = Self.decodeRecord(rec) { DispatchQueue.main.async { onInsert(msg) } }
+            if let msg = Self.decodeRecord(rec), msg.receiver_id == partnerId {
+                DispatchQueue.main.async { onInsert(msg) }
+            }
         }
         // Listen to partner's outgoing messages to me
         _ = ch.onPostgresChange(InsertAction.self, schema: "public", table: "messages", filter: "sender_id=eq.\(partnerId)") { action in
             let rec = action.record
-            guard let recv = rec["receiver_id"] as? String, recv == me else { return }
-            if let msg = Self.decodeRecord(rec) { DispatchQueue.main.async { onInsert(msg) } }
+            if let msg = Self.decodeRecord(rec), msg.receiver_id == me {
+                DispatchQueue.main.async { onInsert(msg) }
+            }
         }
         do { try await ch.subscribeWithError() } catch { return }
         chatChannels[partnerId] = ch

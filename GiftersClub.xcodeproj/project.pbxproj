@@ -421,6 +421,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to capture photos and videos for your posts.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to record audio when capturing video posts.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We save captured photos or videos to your library if you choose to.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to select photos and videos for posts.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -448,6 +452,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to capture photos and videos for your posts.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to record audio when capturing video posts.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We save captured photos or videos to your library if you choose to.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to select photos and videos for posts.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

@@ -152,23 +152,19 @@ struct ChatDetailView: View {
     }
 
     @MainActor private func loadMessages() async {
-        do {
-            let rows = await supabase.syncMessages(partnerId: partner.userId)
-            messages = rows.map { r in
-                MessageItem(
-                    id: r.id,
-                    // Determine direction by comparing to partner id to avoid relying on auth state timing
-                    fromMe: r.sender_id != partner.userId,
-                    text: r.content,
-                    time: Self.relativeTime(r.created_at),
-                    attachments: r.attachments?.compactMap { a in
-                        guard let u = a.url, let url = URL(string: u) else { return nil }
-                        return ChatAttachment(url: url, type: a.type ?? "image")
-                    }
-                )
-            }
-        } catch {
-            // keep previous messages on error
+        let rows = await supabase.syncMessages(partnerId: partner.userId)
+        messages = rows.map { r in
+            MessageItem(
+                id: r.id,
+                // Determine direction by comparing to partner id to avoid relying on auth state timing
+                fromMe: r.sender_id != partner.userId,
+                text: r.content,
+                time: Self.relativeTime(r.created_at),
+                attachments: r.attachments?.compactMap { a in
+                    guard let u = a.url, let url = URL(string: u) else { return nil }
+                    return ChatAttachment(url: url, type: a.type ?? "image")
+                }
+            )
         }
     }
 

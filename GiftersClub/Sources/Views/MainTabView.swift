@@ -26,7 +26,7 @@ struct MainTabView: View {
             // Bottom menu overlays content with equal spacing
             CustomBottomBar(selected: $rootTab, onCompose: { showComposer = true })
         }
-        .sheet(isPresented: $showComposer) { CreatePostSheet() }
+        .fullScreenCover(isPresented: $showComposer) { CreatePostCameraView() }
         .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
             programmaticSelectProfile = true
             if let u = note.object as? String { profileRouteUsername = u }

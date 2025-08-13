@@ -11,6 +11,8 @@ struct FeedPost: Identifiable, Hashable {
     let id: String
     let author: Author
     let caption: String
+    let accessType: String?
+    let price: Int?
     let media: Media
     var likes: Int
     var comments: Int
@@ -108,6 +110,8 @@ struct HomeView: View {
             id: r.id,
             author: author,
             caption: caption,
+            accessType: r.access_type,
+            price: r.price,
             media: media,
             likes: r.like_count ?? 0,
             comments: r.comment_count ?? 0,
@@ -129,12 +133,16 @@ private struct PostPageView: View {
     @State private var showHeart: Bool = false
     @State private var showBreak: Bool = false
     @State private var activeImageIndex: Int = 0
+    @State private var hasAccess: Bool = true
+    @ObservedObject private var supabase = SupabaseManager.shared
 
     var overlaysHidden: Bool { magnify > 1.01 || isPaused }
 
     var body: some View {
         ZStack {
             content
+                .blur(radius: hasAccess ? 0 : 24)
+                .allowsHitTesting(hasAccess)
                 .scaleEffect(isPaused ? 1.03 : 1.0)
                 .animation(.easeInOut(duration: 0.2), value: isPaused)
                 .scaleEffect(magnify)
@@ -176,12 +184,17 @@ private struct PostPageView: View {
 
             // Overlays
             if !overlaysHidden { overlays }
+            if !hasAccess { paywall }
         }
         .simultaneousGesture(doubleTap)
         .onChange(of: isActive) { _, active in
             if !active { isPaused = false; magnify = 1.0 }
         }
         .background(Color.black)
+        .onAppear {
+            if let t = post.accessType, t != "free" { hasAccess = false }
+        }
+        .task { await checkAccess() }
     }
 
     @ViewBuilder
@@ -192,8 +205,49 @@ private struct PostPageView: View {
         case .images(let urls):
             CarouselView(urls: urls, index: $activeImageIndex)
         case .video(let url):
-            VideoBackgroundView(url: url, play: isActive && !isPaused)
+            VideoBackgroundView(url: url, play: isActive && !isPaused && hasAccess)
         }
+    }
+
+    private var paywall: some View {
+        ZStack {
+            Rectangle().fill(Color.black.opacity(0.65)).ignoresSafeArea()
+            VStack(spacing: 12) {
+                Image(systemName: "lock.fill").font(.largeTitle).foregroundStyle(.white)
+                Text(post.accessType == "subscription" ? "Subscribe to view" : "Purchase to view")
+                    .foregroundStyle(.white)
+                if post.accessType == "paid" {
+                    Button(action: { Task { await purchase() } }) {
+                        Text("Unlock for \(post.price ?? 0) tokens").padding(.horizontal, 16).padding(.vertical, 10)
+                    }.buttonStyle(.borderedProminent)
+                } else if post.accessType == "subscription" {
+                    Button(action: { Task { await subscribe() } }) {
+                        Text("Subscribe").padding(.horizontal, 16).padding(.vertical, 10)
+                    }.buttonStyle(.borderedProminent)
+                }
+            }
+            .padding()
+        }
+    }
+
+    private func checkAccess() async {
+        guard let type = post.accessType, type != "free" else { hasAccess = true; return }
+        do {
+            if type == "paid" {
+                hasAccess = try await supabase.hasPostAccess(postId: post.id)
+            } else if type == "subscription" {
+                if let id = try? await supabase.findUserId(byUsername: post.author.username) {
+                    hasAccess = try await supabase.hasSubscription(to: id)
+                } else { hasAccess = false }
+            }
+        } catch { hasAccess = false }
+    }
+
+    private func purchase() async {
+        do { try await supabase.purchasePostAccess(postId: post.id, tokens: post.price ?? 0); hasAccess = true } catch {}
+    }
+    private func subscribe() async {
+        do { if let id = try? await supabase.findUserId(byUsername: post.author.username) { try await supabase.subscribeToCreator(creatorId: id, tokens: 0, duration: .monthly); hasAccess = true } } catch {}
     }
 
     private var overlays: some View {
