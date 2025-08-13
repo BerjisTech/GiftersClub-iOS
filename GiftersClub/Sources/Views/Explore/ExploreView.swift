@@ -243,7 +243,11 @@ private struct ExplorePostCard: View {
     let post: SupabaseManager.ExplorePost
     @ObservedObject private var supabase = SupabaseManager.shared
     @State private var showPaywall = false
-    @State private var hasAccess: Bool = false
+    @State private var hasAccess: Bool
+    init(post: SupabaseManager.ExplorePost) {
+        self.post = post
+        self._hasAccess = State(initialValue: (post.access_type ?? "free") == "free")
+    }
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             if let media = post.media, let first = media.first {
