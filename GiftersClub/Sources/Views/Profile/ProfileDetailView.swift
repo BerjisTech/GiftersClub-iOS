@@ -246,7 +246,8 @@ struct ProfileDetailView: View {
     private func tabContent() -> some View {
         switch activeTab {
         case .posts:
-            PostsGrid2View(posts: postsMinimal,
+            PostsGrid2View(posts: $postsMinimal,
+                           isSelfView: isSelfView,
                            profileUsername: profile?.username ?? "",
                            profileName: profile?.name,
                            profileAvatar: profile?.imageURL)
@@ -399,7 +400,8 @@ private struct PostsGridView: View {
 }
 
 private struct PostsGrid2View: View {
-    let posts: [SupabaseManager.UserPostMinimal]
+    @Binding var posts: [SupabaseManager.UserPostMinimal]
+    let isSelfView: Bool
     let profileUsername: String
     let profileName: String?
     let profileAvatar: URL?
@@ -431,6 +433,13 @@ private struct PostsGrid2View: View {
                         isLong: true,
                         onTapUnlocked: { startIndex = idx; showViewer = true }
                     )
+                    .contextMenu {
+                        if isSelfView {
+                            Button(role: .destructive) {
+                                Task { await deletePost(p.id) }
+                            } label: { Label("Delete", systemImage: "trash") }
+                        }
+                    }
                 }
             }
             .fullScreenCover(isPresented: $showViewer) {
@@ -447,10 +456,20 @@ private struct PostsGrid2View: View {
         }
     }
     private func handleTap(_ p: SupabaseManager.UserPostMinimal) async {}
+    private func deletePost(_ id: String) async {
+        do {
+            try await supabase.deletePost(id: id)
+            if let idx = posts.firstIndex(where: { $0.id == id }) {
+                await MainActor.run { posts.remove(at: idx) }
+            }
+        } catch {
+            // optionally show banner
+        }
+    }
 }
 
 private struct WishlistsListView: View {
-    let items: [SupabaseManager.DBWishlist]
+    @State var items: [SupabaseManager.DBWishlist]
     let isSelfView: Bool
     let username: String
     var body: some View {
@@ -472,11 +491,24 @@ private struct WishlistsListView: View {
                         .padding(8)
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
                     }
+                    .contextMenu {
+                        if isSelfView {
+                            Button(role: .destructive) { Task { await deleteWishlist(w.id) } } label: { Label("Delete", systemImage: "trash") }
+                        }
+                    }
                     .buttonStyle(.plain)
                 }
             }
             .padding(.vertical, 8)
         }
+    }
+    private func deleteWishlist(_ id: String) async {
+        do {
+            try await SupabaseManager.shared.deleteWishlist(id: id)
+            if let idx = items.firstIndex(where: { $0.id == id }) {
+                await MainActor.run { items.remove(at: idx) }
+            }
+        } catch { }
     }
 }
 

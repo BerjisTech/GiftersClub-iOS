@@ -1361,4 +1361,20 @@ final class SupabaseManager: ObservableObject {
             .execute()
         return res.value.count
     }
+
+    // MARK: - Safe delete (archive) Posts & Wishlists
+    func deletePost(id: String) async throws {
+        _ = try await client
+            .from("posts")
+            .delete()
+            .eq("id", value: id)
+            .execute()
+    }
+    func deleteWishlist(id: String) async throws {
+        _ = try await client
+            .from("wishlists")
+            .delete()
+            .eq("id", value: id)
+            .execute()
+    }
 }
