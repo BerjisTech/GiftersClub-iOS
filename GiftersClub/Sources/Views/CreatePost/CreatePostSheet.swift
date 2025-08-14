@@ -2,13 +2,14 @@ import SwiftUI
 import PhotosUI
 import AVFoundation
 
-enum CreatePostStep { case pick, textEditor, details }
+enum CreatePostStep { case pick, textEditor, edit, details }
 
 struct CreatePostSheet: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var vm: CreatePostViewModel
     @State private var step: CreatePostStep
     @StateObject private var banners = BannerQueue()
+    @State private var firstAppearHandled = false
 
     init(vm: CreatePostViewModel? = nil, initial: CreatePostStep = .pick) {
         _vm = StateObject(wrappedValue: vm ?? CreatePostViewModel())
@@ -25,6 +26,13 @@ struct CreatePostSheet: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
         }
         .presentationDetents([.large])
+        .onAppear {
+            // If invoked directly with .details from camera/library, insert the edit step first
+            if !firstAppearHandled {
+                firstAppearHandled = true
+                if step == .details && !vm.media.isEmpty { step = .edit }
+            }
+        }
     }
 
     @ViewBuilder
@@ -35,6 +43,7 @@ struct CreatePostSheet: View {
             vm.addRenderedTextImage(image)
             step = .details
         })
+        case .edit: EditStep()
         case .details: DetailsStep()
         }
     }
@@ -43,6 +52,7 @@ struct CreatePostSheet: View {
         switch step {
         case .pick: return "Create Post"
         case .textEditor: return "Text Post"
+        case .edit: return "Edit"
         case .details: return "Details"
         }
     }
@@ -132,8 +142,27 @@ struct CreatePostSheet: View {
                 if vm.media.isEmpty {
                     banners.show(Banner(title: "Please add media or choose Text Post", style: .warning))
                 } else {
-                    step = .details
+                    step = .edit
                 }
+            }
+        }
+        .padding()
+    }
+
+    private func EditStep() -> some View {
+        VStack(spacing: 12) {
+            if vm.media.isEmpty {
+                Text("No media to edit").foregroundStyle(.secondary)
+            } else {
+                EditableMediaCarousel(vm: vm)
+                    .frame(height: 360)
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.1)))
+            }
+            Spacer()
+            HStack {
+                GradientButton(title: "Back") { step = .pick }
+                Spacer()
+                GradientButton(title: "Next") { step = .details }
             }
         }
         .padding()
@@ -193,7 +222,10 @@ struct CreatePostSheet: View {
                 }
                 vm.publish { _ in
                     banners.show(Banner(title: "Your post has been created", style: .success))
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        NotificationCenter.default.post(name: .goHome, object: nil)
+                        dismiss()
+                    }
                 }
             }
             .disabled(vm.isPosting)
@@ -431,6 +463,88 @@ private struct MediaThumbView: View {
             }
         } catch {
             // Ignore; placeholder will be shown
+        }
+    }
+}
+
+// MARK: - Editable media carousel (basic rotate + filters for images)
+private struct EditableMediaCarousel: View {
+    @ObservedObject var vm: CreatePostViewModel
+    @State private var current: Int = 0
+    @State private var selectedFilter: CameraController.CameraFilter = .none
+    var body: some View {
+        VStack(spacing: 10) {
+            TabView(selection: $current) {
+                ForEach(Array(vm.media.enumerated()), id: \.1.id) { idx, item in
+                    ZStack {
+                        if item.mime.hasPrefix("image/"), let ui = UIImage(data: item.data) {
+                            Image(uiImage: ui)
+                                .resizable()
+                                .scaledToFit()
+                                .tag(idx)
+                        } else {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.primary.opacity(0.06))
+                                .overlay(Image(systemName: "play.circle.fill").font(.system(size: 28)).foregroundStyle(.white))
+                                .tag(idx)
+                        }
+                    }
+                    .padding(6)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+
+            if vm.media.indices.contains(current) && vm.media[current].mime.hasPrefix("image/") {
+                HStack(spacing: 12) {
+                    Button { applyRotate() } label: { Label("Rotate", systemImage: "rotate.right") }
+                    Menu {
+                        ForEach(CameraController.CameraFilter.allCases, id: \.self) { f in
+                            Button(f.rawValue) { selectedFilter = f; applyFilter(f) }
+                        }
+                    } label: { Label("Filter", systemImage: "camera.filters") }
+                }
+            } else {
+                Text("Video editing is limited on Simulator").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func applyRotate() {
+        guard vm.media.indices.contains(current) else { return }
+        let item = vm.media[current]
+        guard let ui = UIImage(data: item.data) else { return }
+        let rotated = UIImage(cgImage: ui.cgImage!, scale: ui.scale, orientation: .right)
+        if let data = rotated.jpegData(compressionQuality: 0.9) {
+            vm.media[current] = .init(data: data, mime: "image/jpeg", kind: .photo)
+        }
+    }
+    private func applyFilter(_ f: CameraController.CameraFilter) {
+        guard vm.media.indices.contains(current) else { return }
+        let item = vm.media[current]
+        guard let ui = UIImage(data: item.data) else { return }
+        let ctx = CIContext()
+        let filtered: UIImage? = {
+            switch f {
+            case .none:
+                return ui
+            case .mono:
+                let ci = CIImage(image: ui)!
+                let out = CIFilter.photoEffectNoir().apply(to: ci)
+                if let out, let cg = ctx.createCGImage(out, from: out.extent) { return UIImage(cgImage: cg, scale: ui.scale, orientation: ui.imageOrientation) }
+                return ui
+            case .sepia:
+                let f = CIFilter.sepiaTone(); f.inputImage = CIImage(image: ui); f.intensity = 1.0
+                if let out = f.outputImage, let cg = ctx.createCGImage(out, from: out.extent) { return UIImage(cgImage: cg, scale: ui.scale, orientation: ui.imageOrientation) }
+                return ui
+            case .vivid:
+                let ci = CIImage(image: ui)!
+                let out = CIFilter.photoEffectProcess().apply(to: ci)
+                if let out, let cg = ctx.createCGImage(out, from: out.extent) { return UIImage(cgImage: cg, scale: ui.scale, orientation: ui.imageOrientation) }
+                return ui
+            }
+        }()
+        if let out = filtered, let data = out.jpegData(compressionQuality: 0.9) {
+            vm.media[current] = .init(data: data, mime: "image/jpeg", kind: .photo)
         }
     }
 }

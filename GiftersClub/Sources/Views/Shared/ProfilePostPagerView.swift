@@ -8,6 +8,8 @@ struct ProfilePostPagerView: View {
     @State var index: Int
 
     @State private var feedPosts: [FeedPost] = []
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var commentsPresenter = CommentsPresenter.shared
 
     private func mapToFeedPost(_ p: SupabaseManager.UserPostMinimal) -> FeedPost? {
         let mediaURLs: [URL] = (p.media ?? []).compactMap { m in m.url.flatMap(URL.init(string:)) }
@@ -43,7 +45,24 @@ struct ProfilePostPagerView: View {
             }
             .frame(width: proxy.size.width, height: fullHeight)
             .background(Color.black.ignoresSafeArea())
+            .overlay(alignment: .topLeading) {
+                Button(action: { dismiss() }) {
+                    Image(systemName: "chevron.down")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(10)
+                        .background(Color.black.opacity(0.35))
+                        .clipShape(Circle())
+                        .padding(.top, 8)
+                        .padding(.leading, 8)
+                }
+            }
             .onAppear { if feedPosts.isEmpty { feedPosts = posts.compactMap(mapToFeedPost) } }
+        }
+        .sheet(isPresented: $commentsPresenter.isPresented) {
+            if let id = commentsPresenter.postId {
+                CommentsSheet(postId: id)
+            }
         }
     }
 
@@ -56,6 +75,7 @@ struct ProfilePostPagerView: View {
             let content = try await SupabaseManager.shared.fetchPostContent(postId: postId) ?? ""
             let likes = (try? await SupabaseManager.shared.likeCount(postId: postId)) ?? 0
             let comments = (try? await SupabaseManager.shared.commentCount(postId: postId)) ?? 0
+            let likedSet = (try? await SupabaseManager.shared.fetchUserLikedPostIDs(postIDs: [postId])) ?? []
             await MainActor.run {
                 let old = feedPosts[i]
                 feedPosts[i] = FeedPost(
@@ -68,7 +88,7 @@ struct ProfilePostPagerView: View {
                     likes: likes,
                     comments: comments,
                     shares: old.shares,
-                    isLiked: old.isLiked
+                    isLiked: likedSet.contains(postId)
                 )
             }
         } catch {

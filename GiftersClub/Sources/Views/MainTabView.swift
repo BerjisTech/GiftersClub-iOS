@@ -50,6 +50,10 @@ struct MainTabView: View {
                 rootTab = .explore
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .goHome)) { _ in
+            rootTab = .home
+            showComposer = false
+        }
     }
 
     private func route(_ link: DeepLink) {
@@ -73,6 +77,7 @@ extension Notification.Name {
     static let showCurrentProfile = Notification.Name("showCurrentProfile")
     static let showHomeWishlists = Notification.Name("showHomeWishlists")
     static let exploreSearch = Notification.Name("exploreSearch")
+    static let goHome = Notification.Name("goHome")
 }
 
 // MARK: - Placeholder Tab Views
