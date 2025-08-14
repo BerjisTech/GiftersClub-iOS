@@ -147,7 +147,7 @@ struct HomeView: View {
 }
 
 // MARK: - Post Page
-private struct PostPageView: View {
+struct PostPageView: View {
     @Binding var post: FeedPost
     let isActive: Bool
     let bottomSafeInset: CGFloat

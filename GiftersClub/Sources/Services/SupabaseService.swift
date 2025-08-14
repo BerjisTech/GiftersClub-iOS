@@ -1330,4 +1330,35 @@ final class SupabaseManager: ObservableObject {
         let res: PostgrestResponse<[DBProfile]> = try await builder.limit(limit).execute()
         return res.value
     }
+
+    // MARK: - Post details for hydration (profile viewer)
+    func fetchPostContent(postId: String) async throws -> String? {
+        struct Row: Decodable { let content: String? }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("posts")
+            .select("content")
+            .eq("id", value: postId)
+            .limit(1)
+            .execute()
+        return res.value.first?.content
+    }
+
+    func likeCount(postId: String) async throws -> Int {
+        let res: PostgrestResponse<[CountRow]> = try await client
+            .from("post_reactions")
+            .select("id")
+            .eq("post_id", value: postId)
+            .eq("type", value: "like")
+            .execute()
+        return res.value.count
+    }
+
+    func commentCount(postId: String) async throws -> Int {
+        let res: PostgrestResponse<[CountRow]> = try await client
+            .from("comments")
+            .select("id")
+            .eq("post_id", value: postId)
+            .execute()
+        return res.value.count
+    }
 }
