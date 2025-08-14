@@ -1069,6 +1069,7 @@ final class SupabaseManager: ObservableObject {
     /// Calls `onInsert` on main thread with the decoded DBMessage.
     func subscribeToChat(partnerId: String, onInsert: @escaping (DBMessage) -> Void) async {
         guard let me = user?.id.uuidString else { return }
+        guard NetworkMonitor.shared.isReachable else { return }
         if chatChannels[partnerId] != nil { return }
         let ch = client.channel("chat-\(me.prefix(6))-\(partnerId.prefix(6))")
         // Listen to my outgoing messages to this partner
@@ -1099,6 +1100,7 @@ final class SupabaseManager: ObservableObject {
     /// Subscribe to all messages involving the current user (for chat list updates).
     func subscribeToAllChats(onInsert: @escaping (DBMessage) -> Void) async {
         guard let me = user?.id.uuidString else { return }
+        guard NetworkMonitor.shared.isReachable else { return }
         if chatIndexChannel != nil { return }
         let ch = client.channel("chat-index-\(me.prefix(6))")
         // Listen for my outgoing messages (receiver can be anyone)

@@ -424,13 +424,7 @@ private struct PostsGrid2View: View {
                     )
                 }
             }
-            .sheet(item: $paywallPost) { pp in
-                if pp.access_type == "subscription" {
-                    PaywallSheet(mode: .subscription(creatorId: pp.user_id), onUnlocked: { unlocked.insert(pp.id) })
-                } else if pp.access_type == "paid" {
-                    PaywallSheet(mode: .paid(postId: pp.id, price: pp.price ?? 0), onUnlocked: { unlocked.insert(pp.id) })
-                }
-            }
+            // Owner and non-owner paywall interactions are handled inside LockablePostCard.
             .padding(.vertical, 8)
         }
     }

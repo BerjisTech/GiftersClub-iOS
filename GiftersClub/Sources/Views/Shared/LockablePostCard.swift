@@ -32,7 +32,14 @@ struct LockablePostCard: View {
     }
 
     var body: some View {
-        let isOwner = (supabase.user?.id.uuidString ?? "") == authorUserId
+        // Robust UUID comparison for ownership (normalizes formatting)
+        let isOwner: Bool = {
+            let current = supabase.user?.id.uuidString ?? ""
+            if let cu = UUID(uuidString: current), let au = UUID(uuidString: authorUserId) {
+                return cu == au
+            }
+            return current.lowercased() == authorUserId.lowercased()
+        }()
         ZStack(alignment: .topTrailing) {
             content
                 .blur(radius: (hasAccess || isOwner) ? 0 : 12)
