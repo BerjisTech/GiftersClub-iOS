@@ -150,22 +150,7 @@ struct CreatePostSheet: View {
     }
 
     private func EditStep() -> some View {
-        VStack(spacing: 12) {
-            if vm.media.isEmpty {
-                Text("No media to edit").foregroundStyle(.secondary)
-            } else {
-                EditableMediaCarousel(vm: vm)
-                    .frame(height: 360)
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.1)))
-            }
-            Spacer()
-            HStack {
-                GradientButton(title: "Back") { step = .pick }
-                Spacer()
-                GradientButton(title: "Next") { step = .details }
-            }
-        }
-        .padding()
+        FullscreenMediaEditor(vm: vm, onBack: { step = .pick }, onDone: { step = .details })
     }
 
     private func DetailsStep() -> some View {
@@ -467,85 +452,187 @@ private struct MediaThumbView: View {
     }
 }
 
-// MARK: - Editable media carousel (basic rotate + filters for images)
-private struct EditableMediaCarousel: View {
+// MARK: - Fullscreen media editor with adjustable filters
+private struct FullscreenMediaEditor: View {
     @ObservedObject var vm: CreatePostViewModel
+    var onBack: () -> Void
+    var onDone: () -> Void
     @State private var current: Int = 0
-    @State private var selectedFilter: CameraController.CameraFilter = .none
+    @State private var preview: UIImage? = nil
+    @State private var params: [UUID: FilterParams] = [:]
+    @State private var activeControl: Control = .brightness
+
+    private let ctx = CIContext()
+    enum Control: String, CaseIterable { case brightness = "Brightness", contrast = "Contrast", saturation = "Saturation", sepia = "Sepia", vignette = "Vignette", temperature = "Temperature" }
+    struct FilterParams { var brightness: Double = 0, contrast: Double = 1, saturation: Double = 1, sepia: Double = 0, vignette: Double = 0, temperature: Double = 6500 }
+
     var body: some View {
-        VStack(spacing: 10) {
-            TabView(selection: $current) {
-                ForEach(Array(vm.media.enumerated()), id: \.1.id) { idx, item in
-                    ZStack {
-                        if item.mime.hasPrefix("image/"), let ui = UIImage(data: item.data) {
-                            Image(uiImage: ui)
-                                .resizable()
-                                .scaledToFit()
-                                .tag(idx)
-                        } else {
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.primary.opacity(0.06))
-                                .overlay(Image(systemName: "play.circle.fill").font(.system(size: 28)).foregroundStyle(.white))
-                                .tag(idx)
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 0) {
+                HStack {
+                    Button(action: onBack) { Image(systemName: "chevron.left").font(.title2.weight(.semibold)) }
+                    Spacer()
+                    Text("Edit").font(.headline)
+                    Spacer()
+                    Button(action: applyAndNext) { Text("Next").font(.headline) }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.3))
+
+                TabView(selection: $current) {
+                    ForEach(Array(vm.media.enumerated()), id: \.1.id) { idx, item in
+                        ZStack {
+                            if let ui = renderPreview(for: item) {
+                                Image(uiImage: ui).resizable().scaledToFit()
+                            } else {
+                                RoundedRectangle(cornerRadius: 0).fill(Color.white.opacity(0.08))
+                                    .overlay(Image(systemName: "play.circle.fill").font(.system(size: 60)).foregroundStyle(.white))
+                            }
                         }
+                        .tag(idx)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black)
                     }
-                    .padding(6)
                 }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .automatic))
+                .tabViewStyle(.page(indexDisplayMode: .automatic))
 
-            if vm.media.indices.contains(current) && vm.media[current].mime.hasPrefix("image/") {
-                HStack(spacing: 12) {
-                    Button { applyRotate() } label: { Label("Rotate", systemImage: "rotate.right") }
-                    Menu {
-                        ForEach(CameraController.CameraFilter.allCases, id: \.self) { f in
-                            Button(f.rawValue) { selectedFilter = f; applyFilter(f) }
+                VStack(spacing: 8) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(Control.allCases, id: \.self) { c in
+                                Text(c.rawValue)
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(activeControl == c ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
+                                    .clipShape(Capsule())
+                                    .onTapGesture { activeControl = c }
+                            }
                         }
-                    } label: { Label("Filter", systemImage: "camera.filters") }
+                        .padding(.horizontal)
+                    }
+                    HStack {
+                        Text("0%").foregroundStyle(.white.opacity(0.7)).font(.caption)
+                        Slider(value: bindingForActive(), in: rangeForActive())
+                        Text("100%").foregroundStyle(.white.opacity(0.7)).font(.caption)
+                    }
+                    .padding(.horizontal)
+                    HStack {
+                        Button("Reset") { resetCurrent() }
+                        Spacer()
+                        Button("Apply to Image") { bakeCurrent() }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
                 }
-            } else {
-                Text("Video editing is limited on Simulator").font(.caption).foregroundStyle(.secondary)
+                .background(Color.black.opacity(0.3))
             }
         }
+        .onChange(of: current) { _, _ in updatePreview() }
+        .onAppear { updatePreview() }
     }
 
-    private func applyRotate() {
+    private func bindingForActive() -> Binding<Double> {
+        guard vm.media.indices.contains(current) else { return .constant(0) }
+        let id = vm.media[current].id
+        let existing = params[id] ?? FilterParams()
+        return Binding<Double>(
+            get: {
+                switch activeControl {
+                case .brightness: return (existing.brightness + 0.5) * 100
+                case .contrast: return (existing.contrast / 2) * 100
+                case .saturation: return (existing.saturation / 2) * 100
+                case .sepia: return existing.sepia * 100
+                case .vignette: return existing.vignette * 100
+                case .temperature: return (existing.temperature - 3000) / 7000 * 100
+                }
+            },
+            set: { newVal in
+                var p = existing
+                switch activeControl {
+                case .brightness: p.brightness = (newVal/100) - 0.5
+                case .contrast: p.contrast = max(0.0, (newVal/100) * 2)
+                case .saturation: p.saturation = max(0.0, (newVal/100) * 2)
+                case .sepia: p.sepia = newVal/100
+                case .vignette: p.vignette = newVal/100
+                case .temperature: p.temperature = 3000 + (newVal/100)*7000
+                }
+                params[id] = p
+                updatePreview()
+            }
+        )
+    }
+    private func rangeForActive() -> ClosedRange<Double> { 0...100 }
+
+    private func resetCurrent() {
+        guard vm.media.indices.contains(current) else { return }
+        params[vm.media[current].id] = FilterParams()
+        updatePreview()
+    }
+    private func bakeCurrent() {
         guard vm.media.indices.contains(current) else { return }
         let item = vm.media[current]
-        guard let ui = UIImage(data: item.data) else { return }
-        let rotated = UIImage(cgImage: ui.cgImage!, scale: ui.scale, orientation: .right)
-        if let data = rotated.jpegData(compressionQuality: 0.9) {
+        guard item.mime.hasPrefix("image/"), let original = UIImage(data: item.data), let ui = filteredImage(for: original, params: params[item.id] ?? FilterParams()) else { return }
+        if let data = ui.jpegData(compressionQuality: 0.9) {
             vm.media[current] = .init(data: data, mime: "image/jpeg", kind: .photo)
+        }
+        updatePreview()
+    }
+    private func applyAndNext() { onDone() }
+
+    private func updatePreview() {
+        guard vm.media.indices.contains(current) else { preview = nil; return }
+        let item = vm.media[current]
+        if item.mime.hasPrefix("image/"), let ui = UIImage(data: item.data) {
+            preview = filteredImage(for: ui, params: params[item.id] ?? FilterParams())
+        } else {
+            preview = nil
         }
     }
-    private func applyFilter(_ f: CameraController.CameraFilter) {
-        guard vm.media.indices.contains(current) else { return }
-        let item = vm.media[current]
-        guard let ui = UIImage(data: item.data) else { return }
-        let ctx = CIContext()
-        let filtered: UIImage? = {
-            switch f {
-            case .none:
-                return ui
-            case .mono:
-                let ci = CIImage(image: ui)!
-                let out = CIFilter.photoEffectNoir().apply(to: ci)
-                if let out, let cg = ctx.createCGImage(out, from: out.extent) { return UIImage(cgImage: cg, scale: ui.scale, orientation: ui.imageOrientation) }
-                return ui
-            case .sepia:
-                let f = CIFilter.sepiaTone(); f.inputImage = CIImage(image: ui); f.intensity = 1.0
-                if let out = f.outputImage, let cg = ctx.createCGImage(out, from: out.extent) { return UIImage(cgImage: cg, scale: ui.scale, orientation: ui.imageOrientation) }
-                return ui
-            case .vivid:
-                let ci = CIImage(image: ui)!
-                let out = CIFilter.photoEffectProcess().apply(to: ci)
-                if let out, let cg = ctx.createCGImage(out, from: out.extent) { return UIImage(cgImage: cg, scale: ui.scale, orientation: ui.imageOrientation) }
-                return ui
-            }
-        }()
-        if let out = filtered, let data = out.jpegData(compressionQuality: 0.9) {
-            vm.media[current] = .init(data: data, mime: "image/jpeg", kind: .photo)
+    private func renderPreview(for item: CreatePostViewModel.MediaItem) -> UIImage? {
+        if item.mime.hasPrefix("image/"), let ui = UIImage(data: item.data) {
+            return filteredImage(for: ui, params: params[item.id] ?? FilterParams())
         }
+        return nil
+    }
+
+    private func filteredImage(for ui: UIImage, params: FilterParams) -> UIImage? {
+        guard let cg = ui.cgImage else { return ui }
+        var img = CIImage(cgImage: cg)
+        // Temperature/tint
+        if let temp = CIFilter(name: "CITemperatureAndTint") {
+            temp.setValue(img, forKey: kCIInputImageKey)
+            temp.setValue(CIVector(x: CGFloat(params.temperature), y: 0), forKey: "inputNeutral")
+            img = temp.outputImage ?? img
+        }
+        // Color controls
+        let color = CIFilter.colorControls()
+        color.inputImage = img
+        color.brightness = Float(params.brightness)
+        color.contrast = Float(params.contrast)
+        color.saturation = Float(params.saturation)
+        img = color.outputImage ?? img
+        // Sepia
+        if params.sepia > 0 {
+            let f = CIFilter.sepiaTone(); f.inputImage = img; f.intensity = Float(params.sepia)
+            img = f.outputImage ?? img
+        }
+        // Vignette
+        if params.vignette > 0, let f = CIFilter(name: "CIVignette") {
+            f.setValue(img, forKey: kCIInputImageKey)
+            f.setValue(params.vignette * 2.5, forKey: kCIInputIntensityKey)
+            f.setValue(2.0, forKey: kCIInputRadiusKey)
+            img = f.outputImage ?? img
+        }
+        if let out = ctx.createCGImage(img, from: img.extent) {
+            return UIImage(cgImage: out, scale: ui.scale, orientation: ui.imageOrientation)
+        }
+        return ui
     }
 }
 
