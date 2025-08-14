@@ -96,7 +96,7 @@ struct HomeView: View {
         defer { Task { await MainActor.run { isLoadingMore = false } } }
         do {
             let rows = try await supabase.fetchFeed(limit: 10, offset: offset)
-            var mapped = rows.compactMap(mapRow)
+            let mapped = rows.compactMap(mapRow)
             if mapped.isEmpty { return }
             await MainActor.run {
                 posts.append(contentsOf: mapped)
@@ -509,107 +509,7 @@ private struct AsyncAvatar: View {
     }
 }
 
-// MARK: - Vertical Pager (TabView rotated hack)
-// MARK: - Vertical UIPageViewController wrapper for perfect paging
-private struct VerticalPageView<Data: RandomAccessCollection, Content: View>: UIViewControllerRepresentable where Data.Element: Identifiable, Data.Element.ID: Hashable {
-    typealias UIViewControllerType = UIPageViewController
-    var items: Data
-    @Binding var selection: Int
-    var content: (Int, Data.Element) -> Content
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeUIViewController(context: Context) -> UIPageViewController {
-        let vc = UIPageViewController(transitionStyle: .scroll, navigationOrientation: .vertical)
-        vc.dataSource = context.coordinator
-        vc.delegate = context.coordinator
-        context.coordinator.reloadPages(controller: vc)
-        return vc
-    }
-
-    func updateUIViewController(_ uiViewController: UIPageViewController, context: Context) {
-        context.coordinator.parent = self
-        // Rebuild pages if the data set size or identity changed
-        if context.coordinator.needsReload(for: items) {
-            context.coordinator.reloadPages(controller: uiViewController)
-        } else {
-            // Otherwise, update existing controllers' root views to reflect state changes
-            context.coordinator.updatePages()
-        }
-        // Only jump if selection differs from current visible index
-        if let current = uiViewController.viewControllers?.first,
-           let currentIndex = context.coordinator.index(of: current),
-           currentIndex != selection {
-            context.coordinator.goTo(targetIndex: selection, controller: uiViewController, animated: false)
-        }
-    }
-
-    final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
-        var parent: VerticalPageView
-        var controllers: [UIHostingController<AnyView>] = []
-        private var lastIDs: [Data.Element.ID] = []
-
-        init(_ parent: VerticalPageView) { self.parent = parent }
-
-        func viewController(at index: Int) -> UIViewController? {
-            guard index >= 0 && index < controllers.count else { return nil }
-            return controllers[index]
-        }
-
-        func index(of viewController: UIViewController) -> Int? {
-            controllers.firstIndex(where: { $0 === viewController })
-        }
-
-        func reloadPages(controller: UIPageViewController) {
-            lastIDs = parent.items.map { $0.id }
-            controllers = parent.items.enumerated().map { idx, item in
-                let host = UIHostingController(rootView: AnyView(parent.content(idx, item)))
-                host.view.backgroundColor = .clear
-                return host
-            }
-            let initial = viewController(at: min(max(parent.selection, 0), max(controllers.count - 1, 0)))
-            if let initial { controller.setViewControllers([initial], direction: .forward, animated: false) }
-        }
-
-        func needsReload(for items: Data) -> Bool {
-            let ids = items.map { $0.id }
-            return ids != lastIDs || items.count != lastIDs.count
-        }
-
-        func updatePages() {
-            for (idx, item) in parent.items.enumerated() {
-                if idx < controllers.count {
-                    controllers[idx].rootView = AnyView(parent.content(idx, item))
-                }
-            }
-        }
-
-        func goTo(targetIndex: Int, controller: UIPageViewController, animated: Bool) {
-            guard let current = controller.viewControllers?.first,
-                  let currentIndex = self.index(of: current),
-                  targetIndex != currentIndex,
-                  let dest = viewController(at: targetIndex) else { return }
-            let direction: UIPageViewController.NavigationDirection = targetIndex > currentIndex ? .forward : .reverse
-            controller.setViewControllers([dest], direction: direction, animated: animated)
-        }
-
-        // MARK: DataSource
-        func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? {
-            guard let idx = index(of: viewController) else { return nil }
-            return self.viewController(at: idx - 1)
-        }
-        func pageViewController(_ pageViewController: UIPageViewController, viewControllerAfter viewController: UIViewController) -> UIViewController? {
-            guard let idx = index(of: viewController) else { return nil }
-            return self.viewController(at: idx + 1)
-        }
-
-        // MARK: Delegate
-        func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
-            guard completed, let current = pageViewController.viewControllers?.first, let idx = index(of: current) else { return }
-            parent.selection = idx
-        }
-    }
-}
+// (Removed old embedded VerticalPageView; use the shared UI/VerticalPageView.swift)
 
 private func extractHashtags(_ text: String) -> [String] {
     let pattern = "#([A-Za-z0-9_]+)"

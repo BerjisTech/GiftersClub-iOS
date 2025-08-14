@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import AVFoundation
 
 enum CreatePostStep { case pick, textEditor, details }
 
@@ -97,27 +98,29 @@ struct CreatePostSheet: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
+                let maxThumbs = 5
+                let total = vm.media.count
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        ForEach(Array(vm.media.enumerated()), id: \.1.id) { idx, item in
+                        ForEach(Array(vm.media.prefix(maxThumbs).enumerated()), id: \.1.id) { idx, item in
                             ZStack(alignment: .topTrailing) {
-                                if item.mime.hasPrefix("image/"), let ui = UIImage(data: item.data) {
-                                    Image(uiImage: ui).resizable().scaledToFill()
-                                } else {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06))
-                                        Image(systemName: "play.circle.fill").font(.system(size: 28)).foregroundStyle(.white)
+                                ZStack {
+                                    MediaThumbView(item: item)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    if idx == maxThumbs - 1 && total > maxThumbs {
+                                        Rectangle().fill(Color.black.opacity(0.35))
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        Text("+\(total - maxThumbs)")
+                                            .font(.headline.weight(.semibold))
+                                            .foregroundStyle(.white)
                                     }
                                 }
-                                Button {
-                                    vm.media.remove(at: idx)
-                                } label: {
+                                Button { vm.media.remove(at: idx) } label: {
                                     Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
                                 }
                                 .padding(6)
                             }
                             .frame(width: 120, height: 180)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                     }
                     .padding(.horizontal, 4)
@@ -138,6 +141,30 @@ struct CreatePostSheet: View {
 
     private func DetailsStep() -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Small media preview (like TikTok) so user can confirm selection
+            if !vm.media.isEmpty {
+                let maxThumbs = 4
+                let total = vm.media.count
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(vm.media.prefix(maxThumbs).enumerated()), id: \.1.id) { idx, item in
+                            ZStack(alignment: .center) {
+                                MediaThumbView(item: item)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                if idx == maxThumbs - 1 && total > maxThumbs {
+                                    Rectangle().fill(Color.black.opacity(0.35))
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Text("+\(total - maxThumbs)")
+                                        .font(.headline.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                            .frame(width: 80, height: 110)
+                        }
+                    }
+                }
+            }
+
             TextField("Say something about your post...", text: $vm.caption, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(3, reservesSpace: true)
@@ -158,6 +185,12 @@ struct CreatePostSheet: View {
             Spacer()
             GradientButton(title: vm.isPosting ? "Posting..." : "Post") {
                 guard !vm.isPosting else { return }
+                if vm.accessType == .paid {
+                    guard let price = Int(vm.priceText), price > 0 else {
+                        banners.show(Banner(title: "Enter a valid price in tokens", style: .warning))
+                        return
+                    }
+                }
                 vm.publish { _ in
                     banners.show(Banner(title: "Your post has been created", style: .success))
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
@@ -186,10 +219,21 @@ private struct TextPostEditor: View {
     let onDone: (UIImage) -> Void
 
     private let gradients: [[Color]] = [
+        // Existing
         [AppColors.primaryStart, AppColors.primaryEnd],
         [AppColors.successStart, AppColors.successEnd],
         [AppColors.warningStart, AppColors.warningEnd],
-        [AppColors.dangerStart, AppColors.dangerEnd]
+        [AppColors.dangerStart, AppColors.dangerEnd],
+        // Additional vibrant presets (mirroring Android drawables vibe)
+        [Color(hex: 0x8E2DE2), Color(hex: 0x4A00E0)], // purple → deep purple
+        [Color(hex: 0xFF512F), Color(hex: 0xDD2476)], // orange → pink
+        [Color(hex: 0x00F260), Color(hex: 0x0575E6)], // green → blue
+        [Color(hex: 0x36D1DC), Color(hex: 0x5B86E5)], // teal → indigo
+        [Color(hex: 0xF7971E), Color(hex: 0xFFD200)], // amber → yellow
+        [Color(hex: 0xFD3A69), Color(hex: 0xFEC163)], // rose → peach
+        [Color(hex: 0x00B4DB), Color(hex: 0x0083B0)], // cyan → teal
+        [Color(hex: 0x11998E), Color(hex: 0x38EF7D)], // emerald
+        [Color(hex: 0xEE0979), Color(hex: 0xFF6A00)]  // magenta → orange
     ]
 
     var body: some View {
@@ -263,7 +307,7 @@ private struct TextPostEditor: View {
 
             // Primary CTA Row
             HStack {
-                GradientButton(title: "Post") { exportAndDone() }
+                GradientButton(title: "Next") { exportAndDone() }
                 Spacer()
                 Button { saveDraft() } label: { Label("Draft", systemImage: "tray.and.arrow.down.fill") }
             }
@@ -283,22 +327,33 @@ private struct TextPostEditor: View {
     }
 
     private func exportAndDone() {
-        let renderer = ImageRenderer(content:
-            ZStack {
-                LinearGradient(colors: gradients[bgIndex], startPoint: .topLeading, endPoint: .bottomTrailing)
-                ScrollView { Text(AttributedString(attributed)).padding() }
+        let content = ZStack {
+            // Opaque background to avoid alpha/NaN issues in CoreGraphics
+            LinearGradient(colors: gradients[bgIndex], startPoint: .topLeading, endPoint: .bottomTrailing)
+            VStack {
+                Text(AttributedString(attributed))
+                    .padding()
             }
-            .frame(width: 640, height: 640)
-            .clipped()
-        )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
+        .frame(width: 640, height: 640)
+        .clipped()
+        let renderer = ImageRenderer(content: content)
         #if os(iOS)
-        if let ui = renderer.uiImage { onDone(ui); dismiss() }
+        renderer.scale = UIScreen.main.scale
+        renderer.isOpaque = true
+        #endif
+        #if os(iOS)
+        if let ui = renderer.uiImage {
+            // Pass the rendered image back to parent to proceed to Details step (price/access)
+            onDone(ui)
+        }
         #endif
     }
-    private func applyBold() { withCurrentTextView { $0.toggleFontTrait(.traitBold) } }
-    private func applyItalic() { withCurrentTextView { $0.toggleFontTrait(.traitItalic) } }
-    private func applyUnderline() { withCurrentTextView { $0.applyAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue) } }
-    private func setHeading(_ level: Int) { let size: CGFloat = level == 1 ? 28 : 24; withCurrentTextView { $0.setFontSize(size) } }
+    private func applyBold() { withCurrentTextView { $0.gc_toggleFontTrait(.traitBold) } }
+    private func applyItalic() { withCurrentTextView { $0.gc_toggleFontTrait(.traitItalic) } }
+    private func applyUnderline() { withCurrentTextView { $0.gc_applyAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue) } }
+    private func setHeading(_ level: Int) { let size: CGFloat = level == 1 ? 28 : 24; withCurrentTextView { $0.gc_setFontSize(size) } }
     private func insertBullet() { insertText("\n• ") }
     private func insertNumbered() { insertText("\n1. ") }
     private func insertQuote() { insertText("\n\"\"") }
@@ -315,7 +370,7 @@ private struct TextPostEditor: View {
             }
         }
     }
-    private func applyColor(_ color: UIColor) { withCurrentTextView { $0.applyAttribute(.foregroundColor, value: color) } }
+    private func applyColor(_ color: UIColor) { withCurrentTextView { $0.gc_applyAttribute(.foregroundColor, value: color) } }
     private func saveDraft() { UserDefaults.standard.set(attributed.string, forKey: "draft_text_post") }
     private func shareDraft() { /* present share sheet in future */ }
     private func confirmCancel() { dismiss() }
@@ -329,4 +384,127 @@ private struct TextPostEditor: View {
 extension TextPostEditor {
     private func applyUndo() { withCurrentTextView { $0.undoManager?.undo() } }
     private func applyRedo() { withCurrentTextView { $0.undoManager?.redo() } }
+}
+
+// MARK: - Media thumbnail view (image or video)
+private struct MediaThumbView: View {
+    let item: CreatePostViewModel.MediaItem
+    @State private var thumbnail: UIImage? = nil
+
+    var body: some View {
+        Group {
+            if let img = resolvedImage() {
+                Image(uiImage: img).resizable().scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.primary.opacity(0.06))
+                    .overlay(Image(systemName: "play.circle.fill").font(.system(size: 22)).foregroundStyle(.white))
+            }
+        }
+        .onAppear { generateIfNeeded() }
+    }
+
+    private func resolvedImage() -> UIImage? {
+        if let thumb = thumbnail { return thumb }
+        if item.mime.hasPrefix("image/"), let ui = UIImage(data: item.data) { return ui }
+        return nil
+    }
+
+    private func generateIfNeeded() {
+        guard item.mime.hasPrefix("video/"), thumbnail == nil else { return }
+        // Write to a temporary file and generate a frame
+        let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("thumb_\(item.id).mp4")
+        do {
+            try item.data.write(to: tmpURL, options: .atomic)
+            let asset: AVAsset = AVURLAsset(url: tmpURL)
+            let gen = AVAssetImageGenerator(asset: asset)
+            gen.appliesPreferredTrackTransform = true
+            let time = CMTime(seconds: 0.1, preferredTimescale: 600)
+            if #available(iOS 18.0, *) {
+                gen.generateCGImagesAsynchronously(forTimes: [NSValue(time: time)]) { _, cg, _, _, _ in
+                    if let cg { DispatchQueue.main.async { self.thumbnail = UIImage(cgImage: cg) } }
+                }
+            } else {
+                if let cg = try? gen.copyCGImage(at: time, actualTime: nil) {
+                    thumbnail = UIImage(cgImage: cg)
+                }
+            }
+        } catch {
+            // Ignore; placeholder will be shown
+        }
+    }
+}
+
+// MARK: - UITextView helpers for formatting
+private extension UITextView {
+    func currentSelectedRange() -> NSRange {
+        let beginning = beginningOfDocument
+        let selectedStart = selectedTextRange?.start ?? endOfDocument
+        let selectedEnd = selectedTextRange?.end ?? endOfDocument
+        let loc = offset(from: beginning, to: selectedStart)
+        let len = offset(from: selectedStart, to: selectedEnd)
+        return NSRange(location: max(0, loc), length: max(0, len))
+    }
+
+    func gc_applyAttribute(_ key: NSAttributedString.Key, value: Any) {
+        let range = currentSelectedRange()
+        if range.length == 0 {
+            // No selection: update typingAttributes so future text uses this style
+            var attrs = typingAttributes
+            attrs[key] = value
+            typingAttributes = attrs
+        } else {
+            let mut = NSMutableAttributedString(attributedString: attributedText ?? NSAttributedString())
+            mut.addAttribute(key, value: value, range: range)
+            attributedText = mut
+            selectedRange = range
+        }
+    }
+
+    func gc_setFontSize(_ size: CGFloat) {
+        let range = currentSelectedRange()
+        if range.length == 0 {
+            if let f = typingAttributes[.font] as? UIFont {
+                typingAttributes[.font] = UIFont(descriptor: f.fontDescriptor, size: size)
+            } else {
+                typingAttributes[.font] = UIFont.systemFont(ofSize: size)
+            }
+        } else {
+            let mut = NSMutableAttributedString(attributedString: attributedText ?? NSAttributedString())
+            mut.enumerateAttribute(.font, in: range) { value, r, _ in
+                let base = (value as? UIFont) ?? UIFont.systemFont(ofSize: size)
+                let new = UIFont(descriptor: base.fontDescriptor, size: size)
+                mut.addAttribute(.font, value: new, range: r)
+            }
+            attributedText = mut
+            selectedRange = range
+        }
+    }
+
+    func gc_toggleFontTrait(_ trait: UIFontDescriptor.SymbolicTraits) {
+        let range = currentSelectedRange()
+        let toggle: (UIFont) -> UIFont = { font in
+            var traits = font.fontDescriptor.symbolicTraits
+            if traits.contains(trait) { traits.remove(trait) } else { traits.insert(trait) }
+            if let desc = font.fontDescriptor.withSymbolicTraits(traits) {
+                return UIFont(descriptor: desc, size: font.pointSize)
+            }
+            return font
+        }
+        if range.length == 0 {
+            if let f = typingAttributes[.font] as? UIFont {
+                typingAttributes[.font] = toggle(f)
+            } else {
+                typingAttributes[.font] = toggle(UIFont.systemFont(ofSize: UIFont.systemFontSize))
+            }
+        } else {
+            let mut = NSMutableAttributedString(attributedString: attributedText ?? NSAttributedString())
+            mut.enumerateAttribute(.font, in: range) { value, r, _ in
+                let base = (value as? UIFont) ?? UIFont.systemFont(ofSize: UIFont.systemFontSize)
+                mut.addAttribute(.font, value: toggle(base), range: r)
+            }
+            attributedText = mut
+            selectedRange = range
+        }
+    }
 }

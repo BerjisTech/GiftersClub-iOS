@@ -246,7 +246,10 @@ struct ProfileDetailView: View {
     private func tabContent() -> some View {
         switch activeTab {
         case .posts:
-            PostsGrid2View(posts: postsMinimal)
+            PostsGrid2View(posts: postsMinimal,
+                           profileUsername: profile?.username ?? "",
+                           profileName: profile?.name,
+                           profileAvatar: profile?.imageURL)
                 .padding(.horizontal)
         case .wishlists:
             WishlistsListView(
@@ -397,17 +400,22 @@ private struct PostsGridView: View {
 
 private struct PostsGrid2View: View {
     let posts: [SupabaseManager.UserPostMinimal]
+    let profileUsername: String
+    let profileName: String?
+    let profileAvatar: URL?
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
     @ObservedObject private var supabase = SupabaseManager.shared
     @State private var paywallPost: SupabaseManager.UserPostMinimal? = nil
     @State private var unlocked: Set<String> = []
+    @State private var showViewer = false
+    @State private var startIndex = 0
     var body: some View {
         if posts.isEmpty {
             VStack(spacing: 8) { Text("No posts yet").foregroundStyle(.secondary) }
                 .padding(.vertical, 16)
         } else {
             LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(posts, id: \.id) { p in
+                ForEach(Array(posts.enumerated()), id: \.1.id) { idx, p in
                     let media: LockablePostCard.MediaKind? = {
                         if let first = p.media?.first, let u = first.url, let url = URL(string: u) {
                             return (first.media_type == "video") ? .video(url) : .image(url)
@@ -420,9 +428,19 @@ private struct PostsGrid2View: View {
                         accessType: p.access_type,
                         price: p.price,
                         media: media,
-                        isLong: true
+                        isLong: true,
+                        onTapUnlocked: { startIndex = idx; showViewer = true }
                     )
                 }
+            }
+            .fullScreenCover(isPresented: $showViewer) {
+                ProfilePostPagerView(
+                    profileUsername: profileUsername,
+                    profileName: profileName,
+                    profileAvatar: profileAvatar,
+                    posts: posts,
+                    index: startIndex
+                )
             }
             // Owner and non-owner paywall interactions are handled inside LockablePostCard.
             .padding(.vertical, 8)
