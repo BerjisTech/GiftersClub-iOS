@@ -461,9 +461,14 @@ private struct FullscreenMediaEditor: View {
     @State private var preview: UIImage? = nil
     @State private var params: [UUID: FilterParams] = [:]
     @State private var activeControl: Control = .brightness
+    @State private var cropMode: Bool = false
+    @State private var cropScale: CGFloat = 1.0
+    @State private var cropOffset: CGSize = .zero
+    @State private var cropAspect: CropAspect = .square
 
     private let ctx = CIContext()
     enum Control: String, CaseIterable { case brightness = "Brightness", contrast = "Contrast", saturation = "Saturation", sepia = "Sepia", vignette = "Vignette", temperature = "Temperature" }
+    enum CropAspect: String, CaseIterable { case free = "Free", square = "1:1", fourFive = "4:5", sixteenNine = "16:9" }
     struct FilterParams { var brightness: Double = 0, contrast: Double = 1, saturation: Double = 1, sepia: Double = 0, vignette: Double = 0, temperature: Double = 6500 }
 
     var body: some View {
@@ -486,7 +491,11 @@ private struct FullscreenMediaEditor: View {
                     ForEach(Array(vm.media.enumerated()), id: \.1.id) { idx, item in
                         ZStack {
                             if let ui = renderPreview(for: item) {
-                                Image(uiImage: ui).resizable().scaledToFit()
+                                if cropMode {
+                                    CropCanvas(image: ui, aspect: cropAspect, scale: $cropScale, offset: $cropOffset)
+                                } else {
+                                    Image(uiImage: ui).resizable().scaledToFit()
+                                }
                             } else {
                                 RoundedRectangle(cornerRadius: 0).fill(Color.white.opacity(0.08))
                                     .overlay(Image(systemName: "play.circle.fill").font(.system(size: 60)).foregroundStyle(.white))
@@ -500,35 +509,76 @@ private struct FullscreenMediaEditor: View {
                 .tabViewStyle(.page(indexDisplayMode: .automatic))
 
                 VStack(spacing: 8) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(Control.allCases, id: \.self) { c in
-                                Text(c.rawValue)
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(activeControl == c ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
-                                    .clipShape(Capsule())
-                                    .onTapGesture { activeControl = c }
+                    // Top row: mode toggle
+                    HStack(spacing: 10) {
+                        Button(action: { cropMode.toggle() }) {
+                            Label("Crop", systemImage: cropMode ? "crop.rotate" : "crop")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.white.opacity(0.2))
+                        .foregroundStyle(.white)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+
+                    if cropMode {
+                        // Crop controls: aspect + apply
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(CropAspect.allCases, id: \.self) { a in
+                                    Text(a.rawValue)
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(cropAspect == a ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
+                                        .clipShape(Capsule())
+                                        .onTapGesture { cropAspect = a }
+                                }
                             }
+                            .padding(.horizontal)
+                        }
+                        HStack {
+                            Button("Reset") { cropScale = 1.0; cropOffset = .zero }
+                            Spacer()
+                            Button("Apply Crop") { applyCrop() }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                    } else {
+                        // Filter controls
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(Control.allCases, id: \.self) { c in
+                                    Text(c.rawValue)
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(activeControl == c ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
+                                        .clipShape(Capsule())
+                                        .onTapGesture { activeControl = c }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                        HStack {
+                            Text("0%").foregroundStyle(.white.opacity(0.7)).font(.caption)
+                            Slider(value: bindingForActive(), in: rangeForActive())
+                            Text("100%").foregroundStyle(.white.opacity(0.7)).font(.caption)
                         }
                         .padding(.horizontal)
+                        HStack {
+                            Button("Reset") { resetCurrent() }
+                            Spacer()
+                            Button("Apply to Image") { bakeCurrent() }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
                     }
-                    HStack {
-                        Text("0%").foregroundStyle(.white.opacity(0.7)).font(.caption)
-                        Slider(value: bindingForActive(), in: rangeForActive())
-                        Text("100%").foregroundStyle(.white.opacity(0.7)).font(.caption)
-                    }
-                    .padding(.horizontal)
-                    HStack {
-                        Button("Reset") { resetCurrent() }
-                        Spacer()
-                        Button("Apply to Image") { bakeCurrent() }
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
                 }
                 .background(Color.black.opacity(0.3))
             }
@@ -585,6 +635,35 @@ private struct FullscreenMediaEditor: View {
     }
     private func applyAndNext() { onDone() }
 
+    private func applyCrop() {
+        guard vm.media.indices.contains(current) else { return }
+        let item = vm.media[current]
+        guard item.mime.hasPrefix("image/"), let original = UIImage(data: item.data) else { return }
+        // Compute crop rect in image coordinates based on cropScale and cropOffset within a unit viewport
+        // Assume base uses aspect fill to cropAspect target; compute rect proportionally.
+        let targetAspect: CGFloat = {
+            switch cropAspect { case .free: return original.size.width / original.size.height
+            case .square: return 1.0
+            case .fourFive: return 4.0/5.0
+            case .sixteenNine: return 16.0/9.0 }
+        }()
+        let iw = original.size.width, ih = original.size.height
+        let cropH = (iw / targetAspect) <= ih ? (iw / targetAspect) : ih
+        let cropW = min(iw, cropH * targetAspect)
+        var x = (iw - cropW)/2 - cropOffset.width * (iw/cropW) / cropScale
+        var y = (ih - cropH)/2 - cropOffset.height * (ih/cropH) / cropScale
+        let w = cropW / cropScale
+        let h = cropH / cropScale
+        let rect = CGRect(x: max(0, min(iw - w, x)), y: max(0, min(ih - h, y)), width: min(iw, w), height: min(ih, h))
+        if let cg = original.cgImage?.cropping(to: rect) {
+            let ui = UIImage(cgImage: cg, scale: original.scale, orientation: original.imageOrientation)
+            if let data = ui.jpegData(compressionQuality: 0.95) {
+                vm.media[current] = .init(data: data, mime: "image/jpeg", kind: .photo)
+            }
+            updatePreview()
+        }
+    }
+
     private func updatePreview() {
         guard vm.media.indices.contains(current) else { preview = nil; return }
         let item = vm.media[current]
@@ -633,6 +712,83 @@ private struct FullscreenMediaEditor: View {
             return UIImage(cgImage: out, scale: ui.scale, orientation: ui.imageOrientation)
         }
         return ui
+    }
+}
+
+// MARK: - Crop canvas view
+private struct CropCanvas: View {
+    let image: UIImage
+    let aspect: FullscreenMediaEditor.CropAspect
+    @Binding var scale: CGFloat
+    @Binding var offset: CGSize
+    @State private var lastScale: CGFloat = 1.0
+    @State private var lastOffset: CGSize = .zero
+    var body: some View {
+        GeometryReader { geo in
+            let container = geo.size
+            let cropSize = cropFrame(in: container)
+            let top = max(0, (container.height - cropSize.height) / 2)
+            let bottom = top
+            let left = max(0, (container.width - cropSize.width) / 2)
+            let right = left
+
+            ZStack {
+                // Image content centered, clipped to crop rect
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: cropSize.width * scale, height: cropSize.height * scale)
+                    .offset(offset)
+                    .gesture(dragGesture().simultaneously(with: magnificationGesture()))
+                    .clipped()
+                    .frame(width: cropSize.width, height: cropSize.height)
+                    .position(x: container.width/2, y: container.height/2)
+
+                // Dimmed overlays around crop rect
+                VStack(spacing: 0) {
+                    Color.black.opacity(0.6).frame(height: top)
+                    HStack(spacing: 0) {
+                        Color.black.opacity(0.6).frame(width: left)
+                        Rectangle().fill(Color.clear).frame(width: cropSize.width, height: cropSize.height)
+                        Color.black.opacity(0.6).frame(width: right)
+                    }
+                    Color.black.opacity(0.6).frame(height: bottom)
+                }
+                // Border
+                Rectangle()
+                    .stroke(Color.white.opacity(0.9), lineWidth: 1)
+                    .frame(width: cropSize.width, height: cropSize.height)
+                    .position(x: container.width/2, y: container.height/2)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
+        }
+    }
+    private func cropFrame(in size: CGSize) -> CGSize {
+        switch aspect {
+        case .free:
+            return CGSize(width: size.width * 0.9, height: size.height * 0.9)
+        case .square:
+            let w = min(size.width, size.height) * 0.9
+            return CGSize(width: w, height: w)
+        case .fourFive:
+            let w = min(size.width, size.height) * 0.95
+            return CGSize(width: w, height: w * 5/4)
+        case .sixteenNine:
+            let w = min(size.width, size.height) * 0.95
+            return CGSize(width: w, height: w * 9/16)
+        }
+    }
+    // Removed mask approach to avoid visibility issues; using four-rect overlay instead.
+    private func dragGesture() -> some Gesture {
+        DragGesture()
+            .onChanged { value in offset = CGSize(width: lastOffset.width + value.translation.width, height: lastOffset.height + value.translation.height) }
+            .onEnded { _ in lastOffset = offset }
+    }
+    private func magnificationGesture() -> some Gesture {
+        MagnificationGesture()
+            .onChanged { v in scale = max(1.0, lastScale * v) }
+            .onEnded { _ in lastScale = scale }
     }
 }
 
