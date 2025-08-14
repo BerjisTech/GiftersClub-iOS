@@ -261,6 +261,60 @@ final class SupabaseManager: ObservableObject {
         }
     }
 
+    // MARK: - Subscription Plans (CRUD)
+    struct DBSubscriptionPlan: Decodable, Identifiable {
+        let id: String
+        let creator_id: String
+        let name: String
+        let description: String?
+        let tokens: Int
+        let duration_type: String
+        let created_at: String?
+        let updated_at: String?
+    }
+    struct UpdateSubscriptionPlanInput: Encodable {
+        var name: String?
+        var description: String?
+        var tokens: Int?
+        var duration_type: String?
+    }
+    func fetchSubscriptionPlans(creatorId: String) async throws -> [DBSubscriptionPlan] {
+        let res: PostgrestResponse<[DBSubscriptionPlan]> = try await client
+            .from("subscription_plans")
+            .select("*")
+            .eq("creator_id", value: creatorId)
+            .order("created_at", ascending: true)
+            .execute()
+        return res.value
+    }
+    func createSubscriptionPlan(name: String, description: String?, tokens: Int, durationType: String) async throws -> DBSubscriptionPlan? {
+        guard let me = user?.id.uuidString else { return nil }
+        struct Insert: Encodable { let creator_id: String; let name: String; let description: String?; let tokens: Int; let duration_type: String }
+        let payload = Insert(creator_id: me, name: name, description: description, tokens: tokens, duration_type: durationType)
+        let res: PostgrestResponse<[DBSubscriptionPlan]> = try await client
+            .from("subscription_plans")
+            .insert(payload)
+            .select("*")
+            .execute()
+        return res.value.first
+    }
+    func updateSubscriptionPlan(id: String, updates: UpdateSubscriptionPlanInput) async throws -> DBSubscriptionPlan? {
+        let res: PostgrestResponse<[DBSubscriptionPlan]> = try await client
+            .from("subscription_plans")
+            .update(updates)
+            .eq("id", value: id)
+            .select("*")
+            .execute()
+        return res.value.first
+    }
+    func deleteSubscriptionPlan(id: String) async throws {
+        _ = try await client
+            .from("subscription_plans")
+            .delete()
+            .eq("id", value: id)
+            .execute()
+    }
+
     // MARK: - Explore Search RPC
     struct ExplorePost: Decodable, Identifiable, Hashable {
         let id: String

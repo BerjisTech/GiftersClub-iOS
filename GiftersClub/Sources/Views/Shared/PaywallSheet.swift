@@ -26,7 +26,7 @@ struct PaywallSheet: View {
                     GradientButton(title: isLoading ? "Subscribing…" : "Subscribe") { Task { await doSubscribe() } }
                 case .paid(_, let price):
                     Text("Purchase to view").font(.headline)
-                    GradientButton(title: isLoading ? "Purchasing…" : "Unlock for \(price) tokens") { Task { await doPurchase() } }
+                    GradientButton(title: isLoading ? "Unlocking…" : "Unlock for \(price) tokens", state: isLoading ? .loading : .normal) { Task { await doPurchase() } }
                 }
                 Button("Top up tokens") { showTopUp = true }
                     .font(.caption)

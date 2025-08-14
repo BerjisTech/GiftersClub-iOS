@@ -32,17 +32,20 @@ struct LockablePostCard: View {
     }
 
     var body: some View {
+        let isOwner = (supabase.user?.id.uuidString ?? "") == authorUserId
         ZStack(alignment: .topTrailing) {
             content
-                .blur(radius: hasAccess ? 0 : 12)
-                .overlay { if !hasAccess { RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35)) } }
+                .blur(radius: (hasAccess || isOwner) ? 0 : 12)
+                .overlay { if !hasAccess && !isOwner { RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35)) } }
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
-            if !hasAccess { Image(systemName: "lock.fill").foregroundStyle(.white).padding(6) }
+            if (!hasAccess) || (isOwner && (accessType ?? "free") != "free") {
+                Image(systemName: "lock.fill").foregroundStyle(.white).padding(6)
+            }
         }
         .contentShape(Rectangle())
-        .onTapGesture { Task { await handleTap() } }
-        .task { await initialCheck() }
+        .onTapGesture { Task { await handleTap(isOwner: isOwner) } }
+        .task { await initialCheck(isOwner: isOwner) }
         .sheet(isPresented: $showPaywall) {
             if accessType == "subscription" {
                 PaywallSheet(mode: .subscription(creatorId: authorUserId), onUnlocked: { hasAccess = true; onTapUnlocked?() })
@@ -78,8 +81,9 @@ struct LockablePostCard: View {
         }
     }
 
-    private func initialCheck() async {
+    private func initialCheck(isOwner: Bool) async {
         let type = accessType ?? "free"
+        if isOwner { hasAccess = true; return }
         if type == "free" { hasAccess = true; return }
         do {
             if type == "paid" {
@@ -90,7 +94,8 @@ struct LockablePostCard: View {
         } catch { hasAccess = false }
     }
 
-    private func handleTap() async {
+    private func handleTap(isOwner: Bool) async {
+        if isOwner { onTapUnlocked?(); return }
         if hasAccess { onTapUnlocked?(); return }
         let type = accessType ?? "free"
         guard type != "free" else { onTapUnlocked?(); return }
@@ -105,4 +110,3 @@ struct LockablePostCard: View {
         } catch { showPaywall = true }
     }
 }
-

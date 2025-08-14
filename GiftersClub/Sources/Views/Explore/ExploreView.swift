@@ -260,6 +260,7 @@ private struct ExplorePostCard: View {
         self._hasAccess = State(initialValue: (post.access_type ?? "free") == "free")
     }
     var body: some View {
+        let isOwner = (supabase.user?.id.uuidString ?? "") == post.user_id
         ZStack(alignment: .bottomLeading) {
             if let media = post.media, let first = media.first {
                 if first.media_type == "photo", let u = first.url, let url = URL(string: u) {
@@ -268,7 +269,7 @@ private struct ExplorePostCard: View {
                             img.resizable().scaledToFill()
                                 .frame(width: geo.size.width, height: geo.size.height)
                                 .clipped()
-                                .blur(radius: hasAccess ? 0 : 12)
+                                .blur(radius: (hasAccess || isOwner) ? 0 : 12)
                         } placeholder: { Color(.secondarySystemBackground) }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -277,15 +278,17 @@ private struct ExplorePostCard: View {
                         VideoThumbnail(url: url)
                             .frame(width: geo.size.width, height: geo.size.height)
                             .clipped()
-                            .blur(radius: hasAccess ? 0 : 12)
+                            .blur(radius: (hasAccess || isOwner) ? 0 : 12)
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(alignment: .center) { Image(systemName: "play.circle.fill").font(.system(size: 36)).foregroundStyle(.white) }
                 } else { Color(.secondarySystemBackground).clipShape(RoundedRectangle(cornerRadius: 12)) }
             } else { Color(.secondarySystemBackground).clipShape(RoundedRectangle(cornerRadius: 12)) }
             if let prof = post.profile { Text(prof.username ?? "").font(.caption).foregroundStyle(.white).padding(6) }
-            if let type = post.access_type, type != "free", !hasAccess {
-                RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35))
+            if let type = post.access_type, type != "free" {
+                if !hasAccess && !isOwner {
+                    RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.35))
+                }
                 VStack { HStack { Spacer(); Image(systemName: "lock.fill").foregroundStyle(.white).padding(6) } ; Spacer() }
             }
         }
@@ -296,10 +299,11 @@ private struct ExplorePostCard: View {
                 PaywallSheet(mode: .paid(postId: post.id, price: post.price ?? 0), onUnlocked: { hasAccess = true })
             }
         }
-        .onTapGesture { Task { await handleTap() } }
-        .task { await initialCheck() }
+        .onTapGesture { Task { await handleTap(isOwner: isOwner) } }
+        .task { await initialCheck(isOwner: isOwner) }
     }
-    private func handleTap() async {
+    private func handleTap(isOwner: Bool) async {
+        if isOwner { return }
         let type = post.access_type ?? "free"
         guard type != "free" else { return }
         do {
@@ -312,8 +316,9 @@ private struct ExplorePostCard: View {
             }
         } catch { showPaywall = true }
     }
-    private func initialCheck() async {
+    private func initialCheck(isOwner: Bool) async {
         let type = post.access_type ?? "free"
+        if isOwner { hasAccess = true; return }
         if type == "free" { hasAccess = true; return }
         do {
             if type == "paid" {

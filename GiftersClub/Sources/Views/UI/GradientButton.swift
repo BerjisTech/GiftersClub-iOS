@@ -50,14 +50,19 @@ struct GradientButton: View {
         }) {
             ZStack {
                 LinearGradient(colors: animatedColors, startPoint: .topLeading, endPoint: .bottomTrailing)
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(Color.white)
-                    .opacity(state == .loading ? 0.0 : 1.0)
                 if state == .loading {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                        Text(title)
+                            .font(.headline)
+                            .foregroundStyle(Color.white)
+                    }
+                } else {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(Color.white)
                 }
             }
             .frame(maxWidth: .infinity)

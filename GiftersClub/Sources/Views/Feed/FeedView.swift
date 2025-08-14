@@ -6,7 +6,7 @@ import DotLottie
 #endif
 
 struct FeedPost: Identifiable, Hashable {
-    struct Author: Hashable { let username: String; let name: String?; let avatarURL: URL? }
+    struct Author: Hashable { let userId: String; let username: String; let name: String?; let avatarURL: URL? }
     enum Media: Hashable { case image(URL); case video(URL); case images([URL]) }
     let id: String
     let author: Author
@@ -125,6 +125,7 @@ struct HomeView: View {
             return .images([])
         }()
         let author = FeedPost.Author(
+            userId: r.profile?.user_id ?? r.user_id,
             username: r.profile?.username ?? "unknown",
             name: r.profile?.username,
             avatarURL: r.profile?.image.flatMap(URL.init(string:))
@@ -158,9 +159,11 @@ private struct PostPageView: View {
     @State private var showBreak: Bool = false
     @State private var activeImageIndex: Int = 0
     @State private var hasAccess: Bool = true
+    @State private var unlocking: Bool = false
     @ObservedObject private var supabase = SupabaseManager.shared
 
     var overlaysHidden: Bool { magnify > 1.01 || isPaused }
+    private var isOwnPost: Bool { (supabase.user?.id.uuidString ?? "") == post.author.userId }
 
     var body: some View {
         ZStack {
@@ -216,7 +219,7 @@ private struct PostPageView: View {
         }
         .background(Color.black)
         .onAppear {
-            if let t = post.accessType, t != "free" { hasAccess = false }
+            if let t = post.accessType, t != "free", !isOwnPost { hasAccess = false }
         }
         .task { await checkAccess() }
     }
@@ -242,8 +245,11 @@ private struct PostPageView: View {
                     .foregroundStyle(.white)
                 if post.accessType == "paid" {
                     Button(action: { Task { await purchase() } }) {
-                        Text("Unlock for \(post.price ?? 0) tokens").padding(.horizontal, 16).padding(.vertical, 10)
-                    }.buttonStyle(.borderedProminent)
+                        Text(unlocking ? "Unlocking..." : "Unlock for \(post.price ?? 0) tokens").padding(.horizontal, 16).padding(.vertical, 10)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(unlocking)
+                    .opacity(unlocking ? 0.6 : 1.0)
                 } else if post.accessType == "subscription" {
                     Button(action: { Task { await subscribe() } }) {
                         Text("Subscribe").padding(.horizontal, 16).padding(.vertical, 10)
@@ -255,6 +261,7 @@ private struct PostPageView: View {
     }
 
     private func checkAccess() async {
+        if isOwnPost { hasAccess = true; return }
         guard let type = post.accessType, type != "free" else { hasAccess = true; return }
         do {
             if type == "paid" {
@@ -268,7 +275,14 @@ private struct PostPageView: View {
     }
 
     private func purchase() async {
-        do { try await supabase.purchasePostAccess(postId: post.id, tokens: post.price ?? 0); hasAccess = true } catch {}
+        await MainActor.run { unlocking = true }
+        defer { Task { await MainActor.run { unlocking = false } } }
+        do {
+            try await supabase.purchasePostAccess(postId: post.id, tokens: post.price ?? 0)
+            await MainActor.run { hasAccess = true }
+        } catch {
+            // leave hasAccess as false; button text will revert via defer
+        }
     }
     private func subscribe() async {
         do { if let id = try? await supabase.findUserId(byUsername: post.author.username) { try await supabase.subscribeToCreator(creatorId: id, tokens: 0, duration: .monthly); hasAccess = true } } catch {}
