@@ -1,0 +1,6 @@
+framework module Pods_GiftersClub {
+  umbrella header "Pods-GiftersClub-umbrella.h"
+
+  export *
+  module * { export * }
+}

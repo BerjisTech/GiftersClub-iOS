@@ -1,0 +1,6 @@
+framework module FlutterwaveSDK {
+  umbrella header "FlutterwaveSDK-umbrella.h"
+
+  export *
+  module * { export * }
+}

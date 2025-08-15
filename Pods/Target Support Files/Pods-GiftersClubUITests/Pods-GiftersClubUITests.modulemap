@@ -1,0 +1,6 @@
+framework module Pods_GiftersClubUITests {
+  umbrella header "Pods-GiftersClubUITests-umbrella.h"
+
+  export *
+  module * { export * }
+}
