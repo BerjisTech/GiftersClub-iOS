@@ -229,9 +229,17 @@ struct WishlistDetailView: View {
                             }
                         }
                     }
-                    if let w = wishlist, let me = supabase.user?.id.uuidString, w.user_id != me {
-                        Divider().padding(.vertical, 4)
-                        ContributeButton(wishlist: w)
+                    if let w = wishlist {
+                        // Robust owner check (normalize UUID formats)
+                        let isOwner: Bool = {
+                            if let authed = supabase.user?.id, let wid = UUID(uuidString: w.user_id) { return authed == wid }
+                            if let me = supabase.user?.id.uuidString { return w.user_id.caseInsensitiveCompare(me) == .orderedSame }
+                            return false
+                        }()
+                        if !isOwner {
+                            Divider().padding(.vertical, 4)
+                            ContributeButton(wishlist: w)
+                        }
                     }
                 }
                 .padding()
