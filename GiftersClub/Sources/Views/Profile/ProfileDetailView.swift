@@ -256,7 +256,8 @@ struct ProfileDetailView: View {
             WishlistsListView(
                 items: wishlists,
                 isSelfView: isSelfView,
-                username: profile?.username ?? ""
+                username: profile?.username ?? "",
+                userId: profile?.userId ?? ""
             )
                 .padding(.horizontal)
         case .gifts:
@@ -522,6 +523,7 @@ private struct WishlistsListView: View {
     @State var items: [SupabaseManager.DBWishlistFull]
     let isSelfView: Bool
     let username: String
+    let userId: String
     @State private var selecting = false
     @State private var selectedIds: Set<String> = []
     @State private var editing: SupabaseManager.DBWishlistFull? = nil
@@ -529,8 +531,18 @@ private struct WishlistsListView: View {
     @State private var editDescription: String = ""
     @State private var editLink: String = ""
     @State private var editTokens: String = ""
+    @State private var showCreate = false
     var body: some View {
         VStack(spacing: 8) {
+            if isSelfView {
+                HStack {
+                    Spacer()
+                    Button { showCreate = true } label: {
+                        Label("Create Wishlist", systemImage: "plus.circle.fill")
+                    }
+                }
+                .padding(.horizontal)
+            }
             if items.isEmpty {
                 VStack(spacing: 8) {
                     if isSelfView { Text("You have not created a wishlist yet").foregroundStyle(.secondary) }
@@ -596,6 +608,7 @@ private struct WishlistsListView: View {
                 .padding(.vertical, 8)
             }
         }
+        .sheet(isPresented: $showCreate, onDismiss: { Task { await reloadWishlists() } }) { CreateWishlistView() }
         .sheet(item: $editing, onDismiss: { resetEditFields() }) { w in
             NavigationStack {
                 Form {
@@ -669,6 +682,7 @@ private struct WishlistsListView: View {
             }
         } catch { }
     }
+    private func reloadWishlists() async { items = (try? await SupabaseManager.shared.fetchWishlistsDetailed(userId: userId, limit: 30, offset: 0)) ?? items }
 }
 
 private struct GiftsCatalogView: View {
