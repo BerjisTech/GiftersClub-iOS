@@ -650,8 +650,8 @@ private struct FullscreenMediaEditor: View {
         let iw = original.size.width, ih = original.size.height
         let cropH = (iw / targetAspect) <= ih ? (iw / targetAspect) : ih
         let cropW = min(iw, cropH * targetAspect)
-        var x = (iw - cropW)/2 - cropOffset.width * (iw/cropW) / cropScale
-        var y = (ih - cropH)/2 - cropOffset.height * (ih/cropH) / cropScale
+        let x = (iw - cropW)/2 - cropOffset.width * (iw/cropW) / cropScale
+        let y = (ih - cropH)/2 - cropOffset.height * (ih/cropH) / cropScale
         let w = cropW / cropScale
         let h = cropH / cropScale
         let rect = CGRect(x: max(0, min(iw - w, x)), y: max(0, min(ih - h, y)), width: min(iw, w), height: min(ih, h))

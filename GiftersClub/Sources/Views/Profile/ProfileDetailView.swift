@@ -32,7 +32,7 @@ struct ProfileDetailView: View {
     @State private var activeTab: ProfileTab = .posts
     @State private var giftsSort: GiftsSort = .newest
     @State private var postsMinimal: [SupabaseManager.UserPostMinimal] = []
-    @State private var wishlists: [SupabaseManager.DBWishlist] = []
+    @State private var wishlists: [SupabaseManager.DBWishlistFull] = []
     @State private var gifts: [SupabaseManager.DBGift] = []
     @State private var showAccount = false
     @State private var showSettings = false
@@ -356,7 +356,7 @@ struct ProfileDetailView: View {
 
             // Load tab data for that profile
             postsMinimal = (try? await supabase.fetchUserPostsMinimal(userId: db.user_id, limit: 20)) ?? []
-            wishlists = (try? await supabase.fetchWishlists(userId: db.user_id, limit: 20)) ?? []
+            wishlists = (try? await supabase.fetchWishlistsDetailed(userId: db.user_id, limit: 30, offset: 0)) ?? []
             gifts = (try? await supabase.fetchGifts(sort: mapSort(giftsSort), limit: 40)) ?? []
         } catch {
             // Avoid spamming banners on transient errors; load quietly
@@ -411,35 +411,72 @@ private struct PostsGrid2View: View {
     @State private var unlocked: Set<String> = []
     @State private var showViewer = false
     @State private var startIndex = 0
+    @State private var selecting = false
+    @State private var selectedIds: Set<String> = []
     var body: some View {
         if posts.isEmpty {
             VStack(spacing: 8) { Text("No posts yet").foregroundStyle(.secondary) }
                 .padding(.vertical, 16)
         } else {
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(Array(posts.enumerated()), id: \.1.id) { idx, p in
-                    let media: LockablePostCard.MediaKind? = {
-                        if let first = p.media?.first, let u = first.url, let url = URL(string: u) {
-                            return (first.media_type == "video") ? .video(url) : .image(url)
+            ZStack(alignment: .bottom) {
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(Array(posts.enumerated()), id: \.1.id) { idx, p in
+                        let media: LockablePostCard.MediaKind? = {
+                            if let first = p.media?.first, let u = first.url, let url = URL(string: u) {
+                                return (first.media_type == "video") ? .video(url) : .image(url)
+                            }
+                            return nil
+                        }()
+                        ZStack(alignment: .topLeading) {
+                            LockablePostCard(
+                                postId: p.id,
+                                authorUserId: p.user_id,
+                                accessType: p.access_type,
+                                price: p.price,
+                                media: media,
+                                isLong: true,
+                                onTapUnlocked: {
+                                    if selecting { toggleSelect(p.id) }
+                                    else { startIndex = idx; showViewer = true }
+                                }
+                            )
+                            .highPriorityGesture(LongPressGesture(minimumDuration: 0.25).onEnded { _ in
+                                if isSelfView {
+                                    selecting = true
+                                    selectedIds.insert(p.id)
+                                }
+                            })
+
+                            if selecting {
+                                let checked = selectedIds.contains(p.id)
+                                Circle()
+                                    .strokeBorder(checked ? Color.green : Color.white, lineWidth: 2)
+                                    .background(Circle().fill(checked ? Color.green : Color.black.opacity(0.3)))
+                                    .frame(width: 24, height: 24)
+                                    .padding(6)
+                                    .onTapGesture { toggleSelect(p.id) }
+                            }
                         }
-                        return nil
-                    }()
-                    LockablePostCard(
-                        postId: p.id,
-                        authorUserId: p.user_id,
-                        accessType: p.access_type,
-                        price: p.price,
-                        media: media,
-                        isLong: true,
-                        onTapUnlocked: { startIndex = idx; showViewer = true }
-                    )
-                    .contextMenu {
-                        if isSelfView {
-                            Button(role: .destructive) {
-                                Task { await deletePost(p.id) }
-                            } label: { Label("Delete", systemImage: "trash") }
-                        }
+                        // No context menu in selection mode; long-press switches to multi-select
                     }
+                }
+
+                if selecting {
+                    HStack {
+                        Button("Cancel") { withAnimation { selecting = false; selectedIds.removeAll() } }
+                            .buttonStyle(.bordered)
+                        Spacer()
+                        Button(role: .destructive) {
+                            Task { await deleteSelected() }
+                        } label: {
+                            Text(selectedIds.isEmpty ? "Delete" : "Delete \(selectedIds.count)")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(selectedIds.isEmpty)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
                 }
             }
             .fullScreenCover(isPresented: $showViewer) {
@@ -460,53 +497,169 @@ private struct PostsGrid2View: View {
         do {
             try await supabase.deletePost(id: id)
             if let idx = posts.firstIndex(where: { $0.id == id }) {
-                await MainActor.run { posts.remove(at: idx) }
+                _ = await MainActor.run { posts.remove(at: idx) }
             }
         } catch {
             // optionally show banner
         }
     }
+    private func toggleSelect(_ id: String) { if selectedIds.contains(id) { selectedIds.remove(id) } else { selectedIds.insert(id) } }
+    private func deleteSelected() async {
+        let ids = Array(selectedIds)
+        for id in ids { _ = try? await supabase.deletePost(id: id) }
+        _ = await MainActor.run {
+            posts.removeAll { selectedIds.contains($0.id) }
+            selectedIds.removeAll()
+            selecting = false
+        }
+    }
 }
 
 private struct WishlistsListView: View {
-    @State var items: [SupabaseManager.DBWishlist]
+    @State var items: [SupabaseManager.DBWishlistFull]
     let isSelfView: Bool
     let username: String
+    @State private var selecting = false
+    @State private var selectedIds: Set<String> = []
+    @State private var editing: SupabaseManager.DBWishlistFull? = nil
+    @State private var editName: String = ""
+    @State private var editDescription: String = ""
+    @State private var editLink: String = ""
+    @State private var editTokens: String = ""
     var body: some View {
-        if items.isEmpty {
-            VStack(spacing: 8) {
-                if isSelfView { Text("You have not created a wishlist yet").foregroundStyle(.secondary) }
-                else { Text("@\(username) has not created any wishlists").foregroundStyle(.secondary) }
-            }
-            .padding(.vertical, 16)
-        } else {
-            VStack(spacing: 8) {
-                ForEach(items, id: \.id) { w in
-                    NavigationLink(destination: WishlistDetailView(wishlistId: w.id)) {
+        VStack(spacing: 8) {
+            if items.isEmpty {
+                VStack(spacing: 8) {
+                    if isSelfView { Text("You have not created a wishlist yet").foregroundStyle(.secondary) }
+                    else { Text("@\(username) has not created any wishlists").foregroundStyle(.secondary) }
+                }
+                .padding(.vertical, 16)
+            } else {
+                ZStack(alignment: .bottom) {
+                    VStack(spacing: 8) {
+                        ForEach(items, id: \.id) { w in
+                            ZStack(alignment: .topLeading) {
+                                NavigationLink(destination: WishlistDetailView(wishlistId: w.id)) {
+                                    HStack {
+                                        RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 44, height: 44)
+                                        Text(w.name ?? "Untitled wishlist").font(.subheadline)
+                                        Spacer()
+                                        if isSelfView && !selecting {
+                                            Menu {
+                                                Button { startEdit(w) } label: { Label("Edit", systemImage: "pencil") }
+                                                Button(role: .destructive) { Task { await deleteWishlist(w.id) } } label: { Label("Delete", systemImage: "trash") }
+                                            } label: {
+                                                Image(systemName: "ellipsis").foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .padding(8)
+                                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
+                                }
+                                .disabled(selecting)
+                                .highPriorityGesture(LongPressGesture(minimumDuration: 0.25).onEnded { _ in
+                                    if isSelfView { selecting = true; selectedIds.insert(w.id) }
+                                })
+
+                                if selecting {
+                                    let checked = selectedIds.contains(w.id)
+                                    Circle()
+                                        .strokeBorder(checked ? Color.green : Color.white, lineWidth: 2)
+                                        .background(Circle().fill(checked ? Color.green : Color.black.opacity(0.3)))
+                                        .frame(width: 24, height: 24)
+                                        .padding(6)
+                                        .onTapGesture { toggleSelect(w.id) }
+                                }
+                            }
+                        }
+                    }
+                    if selecting {
                         HStack {
-                            RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 44, height: 44)
-                            Text(w.title ?? "Untitled wishlist").font(.subheadline)
+                            Button("Cancel") { withAnimation { selecting = false; selectedIds.removeAll() } }
+                                .buttonStyle(.bordered)
                             Spacer()
+                            Button(role: .destructive) { Task { await deleteSelected() } } label: { Text(selectedIds.isEmpty ? "Delete" : "Delete \(selectedIds.count)") }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(selectedIds.isEmpty)
                         }
-                        .padding(8)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
+                        .padding(.horizontal)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial)
                     }
-                    .contextMenu {
-                        if isSelfView {
-                            Button(role: .destructive) { Task { await deleteWishlist(w.id) } } label: { Label("Delete", systemImage: "trash") }
-                        }
+                }
+                .padding(.vertical, 8)
+            }
+        }
+        .sheet(item: $editing, onDismiss: { resetEditFields() }) { w in
+            NavigationStack {
+                Form {
+                    Section("Details") {
+                        TextField("Name", text: $editName)
+                        TextField("Description", text: $editDescription, axis: .vertical)
+                        TextField("Link", text: $editLink)
+                        TextField("Tokens", text: $editTokens).keyboardType(.numberPad)
                     }
-                    .buttonStyle(.plain)
+                }
+                .navigationTitle("Edit Wishlist")
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) { Button("Cancel") { editing = nil } }
+                    ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await saveEdit(w) } } }
                 }
             }
-            .padding(.vertical, 8)
+        }
+    }
+    private func startEdit(_ w: SupabaseManager.DBWishlistFull) {
+        editing = w
+        editName = w.name ?? ""
+        editDescription = w.description ?? ""
+        editLink = w.link ?? ""
+        editTokens = String(w.tokens ?? 0)
+    }
+    private func resetEditFields() { editName = ""; editDescription = ""; editLink = ""; editTokens = "" }
+    private func saveEdit(_ w: SupabaseManager.DBWishlistFull) async {
+        let tokens = Int(editTokens) ?? (w.tokens ?? 0)
+        let updates = SupabaseManager.UpdateWishlistInput(name: editName.isEmpty ? nil : editName,
+                                                         description: editDescription.isEmpty ? nil : editDescription,
+                                                         link: editLink.isEmpty ? nil : editLink,
+                                                         image: nil,
+                                                         tokens: tokens,
+                                                         is_fulfilled: nil)
+        do {
+            try await SupabaseManager.shared.updateWishlist(id: w.id, updates: updates)
+            if let idx = items.firstIndex(where: { $0.id == w.id }) {
+                _ = await MainActor.run {
+                    items[idx] = SupabaseManager.DBWishlistFull(
+                        id: w.id,
+                        user_id: w.user_id,
+                        link: editLink.isEmpty ? w.link : editLink,
+                        name: editName.isEmpty ? w.name : editName,
+                        description: editDescription.isEmpty ? w.description : editDescription,
+                        image: w.image,
+                        tokens: tokens,
+                        is_fulfilled: w.is_fulfilled,
+                        created_at: w.created_at,
+                        profile: w.profile,
+                        wishlist_contributions: w.wishlist_contributions
+                    )
+                }
+            }
+        } catch { }
+        _ = await MainActor.run { editing = nil; resetEditFields() }
+    }
+    private func toggleSelect(_ id: String) { if selectedIds.contains(id) { selectedIds.remove(id) } else { selectedIds.insert(id) } }
+    private func deleteSelected() async {
+        let ids = Array(selectedIds)
+        for id in ids { _ = try? await SupabaseManager.shared.deleteWishlist(id: id) }
+        _ = await MainActor.run {
+            items.removeAll { selectedIds.contains($0.id) }
+            selectedIds.removeAll(); selecting = false
         }
     }
     private func deleteWishlist(_ id: String) async {
         do {
             try await SupabaseManager.shared.deleteWishlist(id: id)
             if let idx = items.firstIndex(where: { $0.id == id }) {
-                await MainActor.run { items.remove(at: idx) }
+                _ = await MainActor.run { items.remove(at: idx) }
             }
         } catch { }
     }
