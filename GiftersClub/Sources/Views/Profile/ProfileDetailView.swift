@@ -555,26 +555,22 @@ private struct WishlistsListView: View {
                         ForEach(items, id: \.id) { w in
                             ZStack(alignment: .topLeading) {
                                 NavigationLink(destination: WishlistDetailView(wishlistId: w.id)) {
-                                    HStack {
-                                        RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 44, height: 44)
-                                        Text(w.name ?? "Untitled wishlist").font(.subheadline)
-                                        Spacer()
-                                        if isSelfView && !selecting {
-                                            Menu {
-                                                Button { startEdit(w) } label: { Label("Edit", systemImage: "pencil") }
-                                                Button(role: .destructive) { Task { await deleteWishlist(w.id) } } label: { Label("Delete", systemImage: "trash") }
-                                            } label: {
-                                                Image(systemName: "ellipsis").foregroundStyle(.secondary)
-                                            }
-                                        }
-                                    }
-                                    .padding(8)
-                                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
+                                    WishlistRowSmall(wishlist: w)
                                 }
                                 .disabled(selecting)
                                 .highPriorityGesture(LongPressGesture(minimumDuration: 0.25).onEnded { _ in
                                     if isSelfView { selecting = true; selectedIds.insert(w.id) }
                                 })
+                                if isSelfView && !selecting {
+                                    HStack { Spacer()
+                                        Menu {
+                                            Button { startEdit(w) } label: { Label("Edit", systemImage: "pencil") }
+                                            Button(role: .destructive) { Task { await deleteWishlist(w.id) } } label: { Label("Delete", systemImage: "trash") }
+                                        } label: {
+                                            Image(systemName: "ellipsis").foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
 
                                 if selecting {
                                     let checked = selectedIds.contains(w.id)

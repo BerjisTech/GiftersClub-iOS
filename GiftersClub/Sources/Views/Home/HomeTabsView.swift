@@ -161,30 +161,7 @@ struct WishlistsHomeView: View {
                 else {
                     ForEach(items, id: \.id) { w in
                         NavigationLink(value: w.id) {
-                            HStack(spacing: 12) {
-                                if let url = wishlistImageURL(w.image, fallback: w.profile?.image) {
-                                    AsyncImage(url: url) { img in
-                                        img.resizable().scaledToFill()
-                                    } placeholder: { ShimmerView() }
-                                    .frame(width: 48, height: 48)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                } else {
-                                    RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)).frame(width: 48, height: 48)
-                                }
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(w.name?.isEmpty == false ? (w.name ?? "Wishlist") : "Wishlist").font(.subheadline).foregroundStyle(.primary)
-                                    if let desc = w.description, !desc.isEmpty {
-                                        Text(desc).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    }
-                                    if let max = w.tokens, max > 0 {
-                                        let contributed = (w.wishlist_contributions ?? []).reduce(0) { $0 + $1.tokens }
-                                        ProgressView(value: Double(contributed), total: Double(max))
-                                            .tint(AppColors.primaryEnd)
-                                    }
-                                }
-                                Spacer()
-                            }
-                            .padding(6)
+                            WishlistRowSmall(wishlist: w)
                         }
                     }
                 }
@@ -203,19 +180,7 @@ struct WishlistsHomeView: View {
         isLoading = true; defer { isLoading = false }
         items = (try? await supabase.fetchAllWishlistsDetailed(limit: 50)) ?? []
     }
-    private func wishlistImageURL(_ src: String?, fallback: String? = nil) -> URL? {
-        if let s = src, !s.isEmpty {
-            if s.lowercased().hasPrefix("http") { return URL(string: s) }
-            let path = s.hasPrefix("/") ? String(s.dropFirst()) : s
-            return SupabaseConfig.webBase.appendingPathComponent(path)
-        }
-        if let f = fallback, !f.isEmpty {
-            if f.lowercased().hasPrefix("http") { return URL(string: f) }
-            let path = f.hasPrefix("/") ? String(f.dropFirst()) : f
-            return SupabaseConfig.webBase.appendingPathComponent(path)
-        }
-        return nil
-    }
+    // Image URL selection moved into WishlistRowSmall
 }
 
 struct WishlistDetailView: View {
@@ -379,6 +344,7 @@ struct CreateWishlistView: View {
     @State private var image: String = ""
     @State private var tokensText: String = ""
     @State private var isSaving = false
+    @State private var errorText: String? = nil
     var body: some View {
         NavigationStack {
             Form {
@@ -391,27 +357,51 @@ struct CreateWishlistView: View {
                     TextField("Image URL or path", text: $image)
                     TextField("External link", text: $link)
                 }
+                if let err = errorText, !err.isEmpty {
+                    Section {
+                        Text(err).foregroundStyle(.red)
+                    }
+                }
             }
             .navigationTitle("New Wishlist")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(action: { Task { await save() } }) { if isSaving { ProgressView() } else { Text("Save") } }.disabled(isSaving) } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) {
+                Button(action: { Task { await save() } }) {
+                    if isSaving { ProgressView() } else { Text("Save") }
+                }
+                .disabled(isSaving || !canSave)
+            } }
         }
     }
+    private var canSave: Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokens = Int(tokensText.filter { $0.isNumber }) ?? 0
+        return !trimmed.isEmpty && tokens > 0
+    }
     private func save() async {
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let me = supabase.user?.id.uuidString else { return }
+        errorText = nil
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, let me = supabase.user?.id.uuidString else { errorText = "Name is required"; return }
         isSaving = true; defer { isSaving = false }
         let tokens = Int(tokensText.filter { $0.isNumber }) ?? 0
+        guard tokens > 0 else { errorText = "Target tokens must be greater than 0"; return }
         let input = SupabaseManager.CreateWishlistInput(
             user_id: me,
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            name: trimmedName,
             description: description.trimmingCharacters(in: .whitespacesAndNewlines),
-            link: link.isEmpty ? nil : link,
+            // Backend currently enforces NOT NULL on link; send a single space when user leaves it empty
+            link: link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? " " : link,
             image: image.isEmpty ? nil : image,
             tokens: tokens,
             is_fulfilled: false
         )
-        _ = try? await supabase.createWishlist(input)
-        dismiss()
+        do {
+            if let _ = try await supabase.createWishlist(input) {
+                dismiss()
+            } else {
+                errorText = "Could not create wishlist. Please try again."
+            }
+        } catch {
+            errorText = (error as NSError).userInfo[NSLocalizedDescriptionKey] as? String ?? error.localizedDescription
+        }
     }
 }
