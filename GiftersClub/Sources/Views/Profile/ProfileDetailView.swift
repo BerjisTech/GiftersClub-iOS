@@ -460,6 +460,8 @@ private struct PostsGrid2View: View {
                         // No context menu in selection mode; long-press switches to multi-select
                     }
                 }
+                // Remove extra bottom space; position bottom bar above CustomBottomBar instead
+                .padding(.bottom, 0)
 
                 if selecting {
                     HStack {
@@ -476,6 +478,7 @@ private struct PostsGrid2View: View {
                     }
                     .padding(.horizontal)
                     .padding(.vertical, 10)
+                    .padding(.bottom, CustomBottomBar.barHeight + 12)
                     .background(.ultraThinMaterial)
                 }
             }
@@ -573,6 +576,8 @@ private struct WishlistsListView: View {
                             }
                         }
                     }
+                    // Do not add extra bottom padding here; bottom bar is offset instead
+                    .padding(.bottom, 0)
                     if selecting {
                         HStack {
                             Button("Cancel") { withAnimation { selecting = false; selectedIds.removeAll() } }
@@ -584,6 +589,7 @@ private struct WishlistsListView: View {
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 10)
+                        .padding(.bottom, CustomBottomBar.barHeight + 12)
                         .background(.ultraThinMaterial)
                     }
                 }
