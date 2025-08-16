@@ -298,6 +298,9 @@ private struct ContributeSheet: View {
     @State private var tokensText: String = ""
     @State private var isSubmitting = false
     @State private var error: String? = nil
+    @State private var showTopUp = false
+    @State private var topUpSucceeded = false
+    @State private var missingTokens: Int? = nil
     var body: some View {
         NavigationStack {
             Form {
@@ -321,6 +324,11 @@ private struct ContributeSheet: View {
                 }
             }
         }
+        .sheet(isPresented: $showTopUp, onDismiss: {
+            if topUpSucceeded { Task { await submit() }; topUpSucceeded = false }
+        }) {
+            TokenTopUpSheet(initialAmount: missingTokens, onCompleted: { success in topUpSucceeded = success })
+        }
     }
     private func submit() async {
         guard let me = supabase.user?.id.uuidString else { return }
@@ -332,7 +340,10 @@ private struct ContributeSheet: View {
             let my = try await supabase.fetchProfile(username: nil, userId: me)
             let balance = my?.token_balance ?? 0
             if balance < tokens {
-                error = "Insufficient tokens. Please top up and try again."
+                // Prompt IAP top up for the shortfall
+                self.error = nil
+                self.missingTokens = max(tokens - balance, 0)
+                self.showTopUp = true
                 return
             }
             try await supabase.contributeToWishlist(wishlistId: wishlist.id, contributorId: me, tokens: tokens)
@@ -353,6 +364,9 @@ struct CreateWishlistView: View {
     @State private var tokensText: String = ""
     @State private var isSaving = false
     @State private var errorText: String? = nil
+    @State private var showTopUp = false
+    @State private var topUpSucceeded = false
+    @State private var missingTokens: Int? = nil
     var body: some View {
         NavigationStack {
             Form {
@@ -378,6 +392,11 @@ struct CreateWishlistView: View {
                 }
                 .disabled(isSaving || !canSave)
             } }
+        }
+        .sheet(isPresented: $showTopUp, onDismiss: {
+            if topUpSucceeded { Task { await save() }; topUpSucceeded = false }
+        }) {
+            TokenTopUpSheet(initialAmount: missingTokens, onCompleted: { success in topUpSucceeded = success })
         }
     }
     private var canSave: Bool {
