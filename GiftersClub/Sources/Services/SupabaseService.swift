@@ -435,6 +435,95 @@ final class SupabaseManager: ObservableObject {
             .execute()
     }
 
+    // MARK: - Live Streaming
+    struct DBLiveStream: Decodable, Identifiable {
+        let id: String
+        let host_id: String
+        let title: String
+        let description: String?
+        let status: String
+        let viewer_count: Int?
+        let started_at: String?
+        let ended_at: String?
+        // Edge function may attach an ephemeral LiveKit token for host/viewer
+        let token: String?
+    }
+
+    struct DBLiveStreamComment: Decodable, Identifiable { let id: String; let live_stream_id: String; let user_id: String; let content: String; let created_at: String? }
+    struct DBLiveStreamViewer: Decodable, Identifiable { let id: String; let live_stream_id: String; let viewer_id: String; let joined_at: String? }
+
+    /// Create a live session via Edge Function (returns stream + LiveKit token for host)
+    func createLiveSession(title: String, description: String?) async throws -> DBLiveStream {
+        struct Payload: Encodable { let hostId: String; let title: String; let description: String? }
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/live-session")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload = Payload(hostId: me, title: title, description: description)
+        req.httpBody = try JSONEncoder().encode(payload)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw NSError(domain: "LiveSession", code: (resp as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: msg ?? "Failed to create live session"]) }
+        return try JSONDecoder().decode(DBLiveStream.self, from: data)
+    }
+
+    /// Fetch a live session via Edge Function (returns stream + viewer token)
+    func fetchLiveSession(_ id: String) async throws -> DBLiveStream {
+        var comps = URLComponents(url: SupabaseConfig.url.appendingPathComponent("functions/v1/live-session"), resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "id", value: id)]
+        var req = URLRequest(url: comps.url!)
+        req.httpMethod = "GET"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw NSError(domain: "LiveSession", code: (resp as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: msg ?? "Failed to fetch live session"]) }
+        return try JSONDecoder().decode(DBLiveStream.self, from: data)
+    }
+
+    /// Update live session row (e.g., status: live/ended, started_at/ended_at)
+    func updateLiveSession(id: String, updates: [String: Any]) async throws -> DBLiveStream {
+        var comps = URLComponents(url: SupabaseConfig.url.appendingPathComponent("functions/v1/live-session"), resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "id", value: id)]
+        var req = URLRequest(url: comps.url!)
+        req.httpMethod = "PATCH"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: updates)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw NSError(domain: "LiveSession", code: (resp as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: msg ?? "Failed to update live session"]) }
+        return try JSONDecoder().decode(DBLiveStream.self, from: data)
+    }
+
+    /// Join as a viewer in DB (for viewer count)
+    func joinLiveStream(streamId: String) async throws {
+        guard let me = user?.id.uuidString else { return }
+        struct Insert: Encodable { let live_stream_id: String; let viewer_id: String }
+        _ = try await client
+            .from("live_stream_viewers")
+            .insert([Insert(live_stream_id: streamId, viewer_id: me)])
+            .execute()
+    }
+
+    func addLiveStreamComment(streamId: String, content: String) async throws -> DBLiveStreamComment? {
+        guard let me = user?.id.uuidString else { return nil }
+        struct Insert: Encodable { let live_stream_id: String; let user_id: String; let content: String }
+        let res: PostgrestResponse<[DBLiveStreamComment]> = try await client
+            .from("live_stream_comments")
+            .insert([Insert(live_stream_id: streamId, user_id: me, content: content)])
+            .select("*")
+            .execute()
+        return res.value.first
+    }
+
     // MARK: - Token Transactions (Top-up)
     struct TokenTransactionInsert: Encodable {
         let user_id: String

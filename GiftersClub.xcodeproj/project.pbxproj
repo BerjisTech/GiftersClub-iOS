@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		9005BD162E51184700611209 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9005BD152E51184700611209 /* LiveKit */; };
 		905EEF1E2E4686430073CC52 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 905EEF1D2E4686430073CC52 /* Auth */; };
 		905EEF202E4686430073CC52 /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = 905EEF1F2E4686430073CC52 /* Functions */; };
 		905EEF222E4686430073CC52 /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = 905EEF212E4686430073CC52 /* PostgREST */; };
@@ -32,6 +33,19 @@
 			remoteInfo = GiftersClub;
 		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		9005BD1A2E5119E900611209 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		905EEEE62E467EFA0073CC52 /* GiftersClub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GiftersClub.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -69,6 +83,7 @@
 				905EEF262E4686430073CC52 /* Storage in Frameworks */,
 				905EEF242E4686430073CC52 /* Realtime in Frameworks */,
 				A0B1C2D43E4F5A6B7C8D9E01 /* Lottie in Frameworks */,
+				9005BD162E51184700611209 /* LiveKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -89,12 +104,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		9005BD142E51184700611209 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		905EEEDD2E467EFA0073CC52 = {
 			isa = PBXGroup;
 			children = (
 				905EEEE82E467EFA0073CC52 /* GiftersClub */,
 				905EEEF62E467EFB0073CC52 /* GiftersClubTests */,
 				905EEF002E467EFB0073CC52 /* GiftersClubUITests */,
+				9005BD142E51184700611209 /* Frameworks */,
 				905EEEE72E467EFA0073CC52 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -119,6 +142,7 @@
 				905EEEE22E467EFA0073CC52 /* Sources */,
 				905EEEE32E467EFA0073CC52 /* Frameworks */,
 				905EEEE42E467EFA0073CC52 /* Resources */,
+				9005BD1A2E5119E900611209 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -136,6 +160,7 @@
 				905EEF252E4686430073CC52 /* Storage */,
 				905EEF272E4686430073CC52 /* Supabase */,
 				A0B1C2D53E4F5A6B7C8D9E02 /* Lottie */,
+				9005BD152E51184700611209 /* LiveKit */,
 			);
 			productName = GiftersClub;
 			productReference = 905EEEE62E467EFA0073CC52 /* GiftersClub.app */;
@@ -218,6 +243,7 @@
 			packageReferences = (
 				905EEF1C2E4686430073CC52 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 				A0B1C2D33E4F5A6B7C8D9E00 /* XCRemoteSwiftPackageReference "lottie-ios" */,
+				9005BC1B2E5113FE00611209 /* XCRemoteSwiftPackageReference "client-sdk-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 905EEEE72E467EFA0073CC52 /* Products */;
@@ -426,8 +452,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Gifters Club";
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLSchemes =     (\n        gifterclub\n    );\n}";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
-				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to capture photos and videos for your posts.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to record audio when capturing video posts.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used for livestreams and for capturing photos/videos for your posts.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone is used for recording audio in live streams and when capturing video posts.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We save captured photos or videos to your library if you choose to.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to select photos and videos for posts.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -462,8 +488,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Gifters Club";
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLSchemes =     (\n        gifterclub\n    );\n}";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
-				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to capture photos and videos for your posts.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to record audio when capturing video posts.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used for livestreams and for capturing photos/videos for your posts.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone is used for recording audio in live streams and when capturing video posts.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We save captured photos or videos to your library if you choose to.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to select photos and videos for posts.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -594,6 +620,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		9005BC1B2E5113FE00611209 /* XCRemoteSwiftPackageReference "client-sdk-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/livekit/client-sdk-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.1;
+			};
+		};
 		905EEF1C2E4686430073CC52 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/supabase-community/supabase-swift";
@@ -613,6 +647,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		9005BD152E51184700611209 /* LiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9005BC1B2E5113FE00611209 /* XCRemoteSwiftPackageReference "client-sdk-ios" */;
+			productName = LiveKit;
+		};
 		905EEF1D2E4686430073CC52 /* Auth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 905EEF1C2E4686430073CC52 /* XCRemoteSwiftPackageReference "supabase-swift" */;

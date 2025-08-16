@@ -23,4 +23,9 @@ enum SupabaseConfig {
     #else
     static let flutterwavePublicKey = "FLWPUBK-23f4ab7e7dfd648de9c957acd063b30d-X"
     #endif
+
+    // LiveKit server URL used by the iOS client to connect to the room created by the Edge Function token
+    // Example (LiveKit Cloud): wss://yourdomain.livekit.cloud
+    // Example (self-hosted):  wss://your.domain:7880
+    static let livekitURL = URL(string: "wss://giftersclub-1ej914uy.livekit.cloud")!
 }

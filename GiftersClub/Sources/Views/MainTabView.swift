@@ -6,6 +6,9 @@ struct MainTabView: View {
     @State private var programmaticSelectProfile = false
     @State private var rootTab: RootTab = .home
     @State private var showComposer = false
+    @State private var showComposeChoice = false
+    @State private var showCreatePost = false
+    @State private var showGoLiveSetup = false
     @State private var profileRouteUsername: String? = nil
     @State private var exploreQuery: String? = nil
 
@@ -24,9 +27,16 @@ struct MainTabView: View {
             .safeAreaInset(edge: .bottom) { Color.clear.frame(height: CustomBottomBar.barHeight) }
 
             // Bottom menu overlays content with equal spacing
-            CustomBottomBar(selected: $rootTab, onCompose: { showComposer = true })
+            CustomBottomBar(selected: $rootTab, onCompose: { showComposeChoice = true })
         }
-        .fullScreenCover(isPresented: $showComposer) { CreatePostCameraView() }
+        .sheet(isPresented: $showComposeChoice) {
+            ComposeChoiceSheet(
+                onCreatePost: { showComposeChoice = false; showCreatePost = true },
+                onGoLive: { showComposeChoice = false; showGoLiveSetup = true }
+            )
+        }
+        .fullScreenCover(isPresented: $showCreatePost) { CreatePostCameraView() }
+        .fullScreenCover(isPresented: $showGoLiveSetup) { GoLiveSetupView() }
         .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
             programmaticSelectProfile = true
             if let u = note.object as? String { profileRouteUsername = u }
@@ -53,6 +63,9 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .goHome)) { _ in
             rootTab = .home
             showComposer = false
+            showComposeChoice = false
+            showCreatePost = false
+            showGoLiveSetup = false
         }
     }
 

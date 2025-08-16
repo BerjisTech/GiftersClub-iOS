@@ -1,0 +1,86 @@
+import Foundation
+import Combine
+import SwiftUI
+
+#if canImport(LiveKit)
+import LiveKit
+
+@MainActor
+final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
+    @Published var isConnected: Bool = false
+    @Published var cameraOn: Bool = false
+    @Published var micOn: Bool = false
+    @Published var localVideoTrack: VideoTrack?
+
+    let room = Room()
+
+    override init() {
+        super.init()
+        room.add(delegate: self)
+    }
+
+    func connectAndPublish(url: URL, token: String) async throws {
+        try await room.connect(url: url.absoluteString, token: token)
+        try await room.localParticipant.setMicrophone(enabled: true)
+        try await room.localParticipant.setCamera(enabled: true)
+        self.isConnected = true
+        self.micOn = true
+        self.cameraOn = true
+        self.localVideoTrack = self.room.localParticipant.videoTracks.first?.track as? LiveKit.VideoTrack
+    }
+
+    func toggleMic() async {
+        do {
+            let newValue = !micOn
+            try await room.localParticipant.setMicrophone(enabled: newValue)
+            self.micOn = newValue
+        } catch { }
+    }
+    func toggleCamera() async {
+        do {
+            let newValue = !cameraOn
+            try await room.localParticipant.setCamera(enabled: newValue)
+            self.cameraOn = newValue
+            self.localVideoTrack = self.room.localParticipant.videoTracks.first?.track as? LiveKit.VideoTrack
+        } catch { }
+    }
+
+    func disconnect() async {
+        await room.disconnect()
+        self.isConnected = false
+        self.localVideoTrack = nil
+        self.micOn = false
+        self.cameraOn = false
+    }
+
+    // RoomDelegate methods are optional; we rely on direct state after publish/toggles.
+}
+
+struct LKVideoView: UIViewRepresentable {
+    let track: LiveKit.VideoTrack?
+    func makeUIView(context: Context) -> LiveKit.VideoView { LiveKit.VideoView() }
+    func updateUIView(_ uiView: LiveKit.VideoView, context: Context) { uiView.track = track }
+}
+
+#else
+
+final class LiveKitPublisher: NSObject, ObservableObject {
+    @Published var isConnected: Bool = false
+    @Published var cameraOn: Bool = false
+    @Published var micOn: Bool = false
+    @Published var localVideoTrack: Any?
+
+    func connectAndPublish(url: URL, token: String) async throws {
+        throw NSError(domain: "LiveKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "LiveKit package not linked to target"])
+    }
+    func toggleMic() async {}
+    func toggleCamera() async {}
+    func disconnect() async {}
+}
+
+struct LKVideoView: View {
+    let track: Any?
+    var body: some View { Color.black }
+}
+
+#endif
