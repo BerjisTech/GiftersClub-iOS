@@ -13,6 +13,7 @@
 		905EEF242E4686430073CC52 /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = 905EEF232E4686430073CC52 /* Realtime */; };
 		905EEF262E4686430073CC52 /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = 905EEF252E4686430073CC52 /* Storage */; };
 		905EEF282E4686430073CC52 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 905EEF272E4686430073CC52 /* Supabase */; };
+		A0B1C2D43E4F5A6B7C8D9E01 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = A0B1C2D53E4F5A6B7C8D9E02 /* Lottie */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -41,22 +42,16 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		905EEEE82E467EFA0073CC52 /* GiftersClub */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = GiftersClub;
 			sourceTree = "<group>";
 		};
 		905EEEF62E467EFB0073CC52 /* GiftersClubTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = GiftersClubTests;
 			sourceTree = "<group>";
 		};
 		905EEF002E467EFB0073CC52 /* GiftersClubUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = GiftersClubUITests;
 			sourceTree = "<group>";
 		};
@@ -73,6 +68,7 @@
 				905EEF1E2E4686430073CC52 /* Auth in Frameworks */,
 				905EEF262E4686430073CC52 /* Storage in Frameworks */,
 				905EEF242E4686430073CC52 /* Realtime in Frameworks */,
+				A0B1C2D43E4F5A6B7C8D9E01 /* Lottie in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,6 +135,7 @@
 				905EEF232E4686430073CC52 /* Realtime */,
 				905EEF252E4686430073CC52 /* Storage */,
 				905EEF272E4686430073CC52 /* Supabase */,
+				A0B1C2D53E4F5A6B7C8D9E02 /* Lottie */,
 			);
 			productName = GiftersClub;
 			productReference = 905EEEE62E467EFA0073CC52 /* GiftersClub.app */;
@@ -220,6 +217,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				905EEF1C2E4686430073CC52 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				A0B1C2D33E4F5A6B7C8D9E00 /* XCRemoteSwiftPackageReference "lottie-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 905EEEE72E467EFA0073CC52 /* Products */;
@@ -426,19 +424,13 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Gifters Club";
+				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLSchemes =     (\n        gifterclub\n    );\n}";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to capture photos and videos for your posts.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to record audio when capturing video posts.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We save captured photos or videos to your library if you choose to.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to select photos and videos for posts.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_CFBundleURLTypes = (
-					{
-						CFBundleURLSchemes = (
-							"gifterclub",
-						);
-					}
-				);
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -468,19 +460,13 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Gifters Club";
+				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLSchemes =     (\n        gifterclub\n    );\n}";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to capture photos and videos for your posts.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use the microphone to record audio when capturing video posts.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We save captured photos or videos to your library if you choose to.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to select photos and videos for posts.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_CFBundleURLTypes = (
-					{
-						CFBundleURLSchemes = (
-							"gifterclub",
-						);
-					}
-				);
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -616,6 +602,14 @@
 				minimumVersion = 2.5.1;
 			};
 		};
+		A0B1C2D33E4F5A6B7C8D9E00 /* XCRemoteSwiftPackageReference "lottie-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/airbnb/lottie-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.3.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -648,6 +642,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 905EEF1C2E4686430073CC52 /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Supabase;
+		};
+		A0B1C2D53E4F5A6B7C8D9E02 /* Lottie */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A0B1C2D33E4F5A6B7C8D9E00 /* XCRemoteSwiftPackageReference "lottie-ios" */;
+			productName = Lottie;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

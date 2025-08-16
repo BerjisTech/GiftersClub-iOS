@@ -9,22 +9,44 @@ final class PaymentCoordinator: NSObject {
     private var webAuthSession: ASWebAuthenticationSession?
     private var webCompletion: ((Bool) -> Void)?
 
-    /// Present web checkout for token top-up using hosted Flutterwave (via your backend).
+    /// Present web checkout for token top-up by invoking a Supabase Edge Function
+    /// that initializes a Flutterwave (or other PSP) session and returns a hosted payment URL.
     /// Expects the backend to redirect back to the app as: gifterclub://payment-callback?success=1&tx_ref=...
     func presentWebTopUp(userId: String, amount: Int) async -> Bool {
-        let txRef = "ios_topup_\(userId)_\(amount)_\(Int(Date().timeIntervalSince1970))"
-        // Construct a backend URL that initiates Flutterwave checkout and redirects back on completion
-        var url = SupabaseConfig.webBase
-            .appendingPathComponent("pay/topup")
-            .appending(queryItems: [
-                URLQueryItem(name: "user_id", value: userId),
-                URLQueryItem(name: "amount", value: String(amount)),
-                URLQueryItem(name: "tx_ref", value: txRef),
-                URLQueryItem(name: "platform", value: "ios")
-            ])
+        let scheme = URLComponents(url: SupabaseConfig.redirectURL, resolvingAgainstBaseURL: false)?.scheme
+        let callback = "\(scheme ?? "gifterclub")://\(SupabaseConfig.paymentCallbackHost)"
 
-        // Prefer ASWebAuthenticationSession for a clean callback into the app
-        if let scheme = URLComponents(url: SupabaseConfig.redirectURL, resolvingAgainstBaseURL: false)?.scheme {
+        // Build request to Edge Function (purchase-tokens-init)
+        let functionURL = SupabaseConfig.url
+            .appendingPathComponent("functions/v1/")
+            .appendingPathComponent(SupabaseConfig.paymentTopUpFunctionName)
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await SupabaseManager.shared.client.auth.session.accessToken {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "userId": userId,
+            "amount": amount,
+            "platform": "ios",
+            "callback_url": callback
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                return false
+            }
+            // Parse response for a hosted payment URL and tx_ref
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let urlString = (json?["payment_url"] as? String)
+                ?? (json?["checkout_url"] as? String)
+                ?? (json?["redirect_url"] as? String)
+            guard let urlString, let url = URL(string: urlString), let scheme else { return false }
+
             return await withCheckedContinuation { continuation in
                 self.webCompletion = { success in continuation.resume(returning: success) }
                 self.webAuthSession = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme) { callbackURL, error in
@@ -40,27 +62,16 @@ final class PaymentCoordinator: NSObject {
                 self.webAuthSession?.presentationContextProvider = self
                 self.webAuthSession?.start()
             }
-        }
-
-        // Fallback: open in SFSafariViewController without callback (returns false on dismissal)
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.main.async {
-                guard let root = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first?.rootViewController else {
-                    continuation.resume(returning: false); return
-                }
-                let safari = SFSafariViewController(url: url)
-                safari.modalPresentationStyle = .formSheet
-                root.present(safari, animated: true)
-                // No callback in this path; caller should refresh balance manually later
-                continuation.resume(returning: false)
-            }
+        } catch {
+            return false
         }
     }
 
     // Allow onOpenURL handler to complete flows started outside ASWebAuthenticationSession if needed
     func handleWebCallback(_ url: URL) {
         let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        if url.host == "payment-callback" {
+        if url.scheme == URLComponents(url: SupabaseConfig.redirectURL, resolvingAgainstBaseURL: false)?.scheme,
+           url.host == SupabaseConfig.paymentCallbackHost {
             let success = comps?.queryItems?.first(where: { $0.name == "success" })?.value == "1"
             webCompletion?(success)
             webCompletion = nil

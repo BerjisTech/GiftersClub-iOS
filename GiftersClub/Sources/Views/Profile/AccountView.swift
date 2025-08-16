@@ -8,8 +8,11 @@ struct AccountView: View {
     @State private var giftsReceived = 0
     @State private var openWishlists = 0
     @State private var fulfilledWishlists = 0
+    @State private var showTopUp = false
+    @StateObject private var banners = BannerQueue()
 
     var body: some View {
+        ZStack(alignment: .top) {
         ScrollView {
             VStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -41,7 +44,7 @@ struct AccountView: View {
                             }
                         }
                         HStack(spacing: 10) {
-                            GradientButton(title: "Buy Tokens") { /* TODO: payment */ }
+                            GradientButton(title: "Buy Tokens") { showTopUp = true }
                             NavigationLink(destination: WithdrawalsView()) {
                                 GradientButton(title: "Withdraw") {}
                             }
@@ -100,6 +103,16 @@ struct AccountView: View {
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .sheet(isPresented: $showTopUp, onDismiss: { Task { await load() } }) {
+            TokenTopUpSheet(onCompleted: { success in
+                if success {
+                    Task { await load() }
+                    banners.show(Banner(title: "Balance refreshed", style: .success))
+                }
+            })
+        }
+        BannerHost().environmentObject(banners)
+        }
     }
 
     private func load() async {
