@@ -22,6 +22,11 @@ struct GiftersClubApp: App {
                     supabase.handleOpenURL(url)
                     return
                 }
+                // Payment callback (web checkout)
+                if url.scheme == "gifterclub", url.host == "payment-callback" {
+                    PaymentCoordinator.shared.handleWebCallback(url)
+                    return
+                }
                 // App deep links
                 deepLink = DeepLinkRouter.parse(url: url)
             }

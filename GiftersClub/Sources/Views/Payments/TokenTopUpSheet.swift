@@ -1,7 +1,4 @@
 import SwiftUI
-#if canImport(FlutterwaveSDK)
-import FlutterwaveSDK
-#endif
 
 struct TokenTopUpSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -40,26 +37,12 @@ struct TokenTopUpSheet: View {
     private func purchase() async {
         guard let me = supabase.user?.id.uuidString else { return }
         await MainActor.run { isProcessing = true }
-        #if canImport(FlutterwaveSDK)
-        if SupabaseConfig.flutterwavePublicKey.isEmpty {
-            await MainActor.run { errorText = "Payment unavailable. Please try again later."; isProcessing = false }
-            return
+        // Web checkout via hosted Flutterwave (backend handles token crediting)
+        let success = await PaymentCoordinator.shared.presentWebTopUp(userId: me, amount: amount)
+        if success {
+            // Backend should credit tokens; optionally refresh balance here
+            await MainActor.run { onCompleted?(true); dismiss() }
         }
-        let txRef = "ios_topup_\(me)_\(amount)_\(Int(Date().timeIntervalSince1970))"
-        do {
-            let success = try await PaymentCoordinator.shared.presentFlutterwaveTopUp(publicKey: SupabaseConfig.flutterwavePublicKey, amount: amount, txRef: txRef)
-            if success {
-                try await supabase.processPurchaseTokens(userId: me, tokens: amount, txRef: txRef)
-                await MainActor.run { onCompleted?(true); dismiss() }
-            } else {
-                await MainActor.run { errorText = "Payment failed or cancelled." }
-            }
-        } catch {
-            await MainActor.run { errorText = "Payment failed or cancelled." }
-        }
-        #else
-        await MainActor.run { errorText = "Payment unavailable. Please install Flutterwave SDK." }
-        #endif
         await MainActor.run { isProcessing = false }
     }
 }
