@@ -11,10 +11,15 @@ struct LiveViewerView: View {
     @State private var profilesCache: [String: SupabaseManager.DBProfile] = [:]
     @State private var newComment: String = ""
     @State private var commentsTimer: Timer? = nil
+    @State private var statusTimer: Timer? = nil
+    @State private var ended: Bool = false
+    @State private var suggestions: [SupabaseManager.DBLiveStreamWithStats] = []
 
     var body: some View {
         ZStack {
-            if let track = viewer.remoteVideoTrack {
+            if ended {
+                endedView
+            } else if let track = viewer.remoteVideoTrack {
                 LKVideoView(track: track)
                     .ignoresSafeArea()
             } else {
@@ -28,21 +33,23 @@ struct LiveViewerView: View {
                 .ignoresSafeArea()
             }
 
-            VStack {
-                topBar
-                Spacer()
-                bottomBar
+            if !ended {
+                VStack {
+                    topBar
+                    Spacer()
+                    bottomBar
+                }
+                .padding()
             }
-            .padding()
         }
         .background(Color.black)
         .toolbar(.hidden, for: .navigationBar)
-        .task { await join(); await loadComments() }
+        .task { await join(); await loadComments(); await startStatusPolling() }
         .alert("Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorText ?? "") }
         .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil) }
-        .onDisappear { NotificationCenter.default.post(name: .showBottomBar, object: nil); commentsTimer?.invalidate(); commentsTimer = nil }
+        .onDisappear { NotificationCenter.default.post(name: .showBottomBar, object: nil); commentsTimer?.invalidate(); commentsTimer = nil; statusTimer?.invalidate(); statusTimer = nil }
     }
 
     private var topBar: some View {
@@ -109,7 +116,10 @@ struct LiveViewerView: View {
     }
 
     private func username(for userId: String) -> String {
-        if let cached = profilesCache[userId] { return cached.username ?? cached.name ?? "" }
+        if let cached = profilesCache[userId] {
+            let uname = cached.username
+            return !uname.isEmpty ? uname : (cached.name ?? "")
+        }
         Task {
             if let p = try? await supa.fetchProfileByUserId(userId) {
                 await MainActor.run { profilesCache[userId] = p }
@@ -148,5 +158,61 @@ struct LiveViewerView: View {
         let text = newComment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if let _ = try? await supa.sendLiveComment(streamId: live.id, content: text) { newComment = "" }
+    }
+
+    // MARK: - Ended state and suggestions
+    private var endedView: some View {
+        VStack(spacing: 12) {
+            Text("This live has ended").font(.headline).foregroundStyle(.white)
+            if suggestions.isEmpty {
+                Text("Exploring other lives…").foregroundStyle(.white.opacity(0.8))
+            } else {
+                let columns = [GridItem(.flexible()), GridItem(.flexible())]
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 10) {
+                        ForEach(suggestions, id: \.id) { s in
+                            NavigationLink(destination: LiveViewerView(live: s)) {
+                                ZStack(alignment: .bottomLeading) {
+                                    if let t = s.thumbnail_url, let url = URL(string: t) {
+                                        AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { Color.black }
+                                    } else { Color.black }
+                                    LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(s.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(2)
+                                        HStack(spacing: 12) {
+                                            Label("\(s.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption2)
+                                        }
+                                    }.padding(8)
+                                }
+                                .frame(height: 160)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+                    }.padding()
+                }
+            }
+            Button("Back to Feed") { NotificationCenter.default.post(name: .goHome, object: nil) }
+                .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private func startStatusPolling() async {
+        statusTimer?.invalidate()
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            Task {
+                if let row = try? await supa.fetchLiveStreamById(live.id), row.status != "live" {
+                    await MainActor.run {
+                        ended = true
+                        Task { await viewer.disconnect() }
+                        NotificationCenter.default.post(name: .showBottomBar, object: nil)
+                    }
+                    if suggestions.isEmpty {
+                        if let lives = try? await supa.fetchFeedLiveStreams(limit: 4, query: nil) {
+                            await MainActor.run { suggestions = lives }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

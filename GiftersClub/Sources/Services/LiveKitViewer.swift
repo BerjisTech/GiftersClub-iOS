@@ -30,11 +30,13 @@ final class LiveKitViewer: NSObject, ObservableObject, RoomDelegate {
         // Poll for track in case delegate signature differs; ensures video eventually binds
         trackPollTimer?.invalidate()
         trackPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            if self.remoteVideoTrack == nil,
-               let first = self.room.remoteParticipants.values.first,
-               let vt = first.videoTracks.first?.track as? LiveKit.VideoTrack {
-                Task { @MainActor in self.remoteVideoTrack = vt }
+            Task { @MainActor in
+                guard let self else { return }
+                if self.remoteVideoTrack == nil,
+                   let first = self.room.remoteParticipants.values.first,
+                   let vt = first.videoTracks.first?.track as? LiveKit.VideoTrack {
+                    self.remoteVideoTrack = vt
+                }
             }
         }
     }
