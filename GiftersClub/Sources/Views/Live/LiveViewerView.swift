@@ -14,6 +14,7 @@ struct LiveViewerView: View {
     @State private var statusTimer: Timer? = nil
     @State private var ended: Bool = false
     @State private var suggestions: [SupabaseManager.DBLiveStreamWithStats] = []
+    @State private var viewerCount: Int = 0
 
     var body: some View {
         ZStack {
@@ -21,6 +22,7 @@ struct LiveViewerView: View {
                 endedView
             } else if let track = viewer.remoteVideoTrack {
                 LKVideoView(track: track)
+                    .scaleEffect(x: -1, y: 1) // mirror horizontally to match Angular (-scale-x-100)
                     .ignoresSafeArea()
             } else {
                 // Fallback: thumbnail overlay until video subscribed
@@ -30,6 +32,7 @@ struct LiveViewerView: View {
                     } else { Color.black }
                     LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
                 }
+                .scaleEffect(x: -1, y: 1)
                 .ignoresSafeArea()
             }
 
@@ -44,7 +47,10 @@ struct LiveViewerView: View {
         }
         .background(Color.black)
         .toolbar(.hidden, for: .navigationBar)
-        .task { await join(); await loadComments(); await startStatusPolling() }
+        .task {
+            await join(); await loadComments(); await startStatusPolling()
+            if let row = try? await supa.fetchLiveStreamById(live.id) { viewerCount = row.viewer_count ?? 0 }
+        }
         .alert("Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorText ?? "") }
@@ -59,7 +65,7 @@ struct LiveViewerView: View {
                 Text("LIVE")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white)
-                Label("\(live.viewer_count ?? 0)", systemImage: "eye.fill")
+                Label("\(viewerCount)", systemImage: "eye.fill")
                     .foregroundStyle(.white.opacity(0.9))
                     .font(.footnote)
             }
@@ -200,7 +206,8 @@ struct LiveViewerView: View {
         statusTimer?.invalidate()
         statusTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
             Task {
-                if let row = try? await supa.fetchLiveStreamById(live.id), row.status != "live" {
+                if let row = try? await supa.fetchLiveStreamById(live.id) {
+                    if row.status != "live" {
                     await MainActor.run {
                         ended = true
                         Task { await viewer.disconnect() }
@@ -210,6 +217,9 @@ struct LiveViewerView: View {
                         if let lives = try? await supa.fetchFeedLiveStreams(limit: 4, query: nil) {
                             await MainActor.run { suggestions = lives }
                         }
+                    }
+                    } else {
+                        await MainActor.run { viewerCount = row.viewer_count ?? 0 }
                     }
                 }
             }

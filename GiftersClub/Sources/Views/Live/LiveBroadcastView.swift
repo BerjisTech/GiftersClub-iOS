@@ -18,6 +18,7 @@ struct LiveBroadcastView: View {
                 Color.black.ignoresSafeArea()
                 if let track = publisher.localVideoTrack {
                     LKVideoView(track: track)
+                        .scaleEffect(x: publisher.isFront ? -1 : 1, y: 1)
                         .ignoresSafeArea()
                 } else {
                     VStack(spacing: 10) {
