@@ -499,14 +499,14 @@ final class SupabaseManager: ObservableObject {
 
     /// Request a viewer token for LiveKit by stream ID via Edge Function.
     func fetchLiveViewerToken(streamId: String) async throws -> String {
-        struct Payload: Encodable { let streamId: String; let role: String }
+        struct Payload: Encodable { let action: String; let streamId: String; let type: String }
         let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/live-session")
         var req = URLRequest(url: functionURL)
         req.httpMethod = "POST"
         req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
         if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        let payload = Payload(streamId: streamId, role: "viewer")
+        let payload = Payload(action: "token", streamId: streamId, type: "viewer")
         req.httpBody = try JSONEncoder().encode(payload)
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
