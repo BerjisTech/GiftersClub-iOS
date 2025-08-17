@@ -95,6 +95,9 @@ struct HomeView: View {
         await MainActor.run { isLoading = true }
         defer { Task { await MainActor.run { isLoading = false } } }
         do {
+            #if DEBUG
+            print("[Feed] fetching posts limit=10 offset=0")
+            #endif
             let rows = try await supabase.fetchFeed(limit: 10, offset: 0)
             var mapped = rows.compactMap(mapRow)
             // Initialize liked state for current user
@@ -103,7 +106,13 @@ struct HomeView: View {
                 for i in mapped.indices { mapped[i].isLiked = liked.contains(mapped[i].id) }
             }
             // Fetch ranked live streams and interleave
+            #if DEBUG
+            print("[Feed] posts=\(mapped.count)")
+            #endif
             let lives = try? await supabase.fetchFeedLiveStreams(limit: max(1, mapped.count / 3), query: nil)
+            #if DEBUG
+            print("[Feed] lives returned=\(lives?.count ?? -1)")
+            #endif
             let combined = interleave(posts: mapped, lives: lives ?? [])
             await MainActor.run {
                 posts = mapped
@@ -121,6 +130,9 @@ struct HomeView: View {
         await MainActor.run { isLoadingMore = true }
         defer { Task { await MainActor.run { isLoadingMore = false } } }
         do {
+            #if DEBUG
+            print("[Feed] loadMore offset=\(offset)")
+            #endif
             let rows = try await supabase.fetchFeed(limit: 10, offset: offset)
             let mapped = rows.compactMap(mapRow)
             if mapped.isEmpty { return }
@@ -179,6 +191,10 @@ struct HomeView: View {
 // MARK: - Live card view
 struct LiveCardView: View {
     let live: SupabaseManager.DBLiveStreamWithStats
+    @State private var profile: SupabaseManager.DBProfile? = nil
+    @State private var viewerCount: Int? = nil
+    @State private var timer: Timer? = nil
+    private let supabase = SupabaseManager.shared
     var body: some View {
         ZStack(alignment: .bottom) {
             ZStack {
@@ -199,13 +215,30 @@ struct LiveCardView: View {
                         Text("LIVE NOW").font(.caption.bold()).foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 4).background(Color.red).clipShape(Capsule())
                     }
                     Spacer()
-                    Label("\(live.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption)
+                    Label("\(viewerCount ?? live.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption)
+                }
+                HStack(spacing: 8) {
+                    if let img = profile?.image, let url = URL(string: img) {
+                        AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                            .frame(width: 28, height: 28)
+                            .clipShape(Circle())
+                    } else { Circle().fill(Color.white.opacity(0.2)).frame(width: 28, height: 28) }
+                    Text(profile?.name ?? profile?.username ?? "").foregroundStyle(.white).font(.subheadline.weight(.semibold))
+                    Spacer()
                 }
                 Text(live.title).font(.headline).foregroundStyle(.white).lineLimit(2)
             }
             .padding()
         }
         .background(Color.black)
+        .task {
+            if profile == nil { if let p = try? await supabase.fetchProfileByUserId(live.host_id) { await MainActor.run { profile = p } } }
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { _ in
+                Task { if let row = try? await supabase.fetchLiveStreamById(live.id) { await MainActor.run { viewerCount = row.viewer_count } } }
+            }
+        }
+        .onDisappear { timer?.invalidate(); timer = nil }
     }
 }
 

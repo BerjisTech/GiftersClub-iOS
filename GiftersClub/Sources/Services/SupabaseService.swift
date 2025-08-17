@@ -472,6 +472,9 @@ final class SupabaseManager: ObservableObject {
         let res: PostgrestResponse<[DBLiveStreamWithStats]> = try await client
             .rpc("feed_live_streams", params: params)
             .execute()
+        #if DEBUG
+        print("[RPC] feed_live_streams in_query=\(query ?? "") returned=\(res.value.count)")
+        #endif
         return res.value
     }
 
@@ -517,7 +520,35 @@ final class SupabaseManager: ObservableObject {
         guard let token = json["token"] as? String else {
             throw NSError(domain: "LiveViewerToken", code: -2, userInfo: [NSLocalizedDescriptionKey: "Missing token in response"])
         }
+        #if DEBUG
+        print("[LiveKit] viewer token fetched length=\(token.count)")
+        #endif
         return token
+    }
+
+    // MARK: - Lightweight DB fetches for live previews
+    func fetchLiveStreamById(_ id: String) async throws -> DBLiveStream? {
+        struct Row: Decodable { let id: String; let host_id: String; let title: String; let description: String?; let status: String; let viewer_count: Int?; let started_at: String?; let ended_at: String? }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("live_streams")
+            .select("id,host_id,title,description,status,viewer_count,started_at,ended_at")
+            .eq("id", value: id)
+            .limit(1)
+            .execute()
+        if let r = res.value.first {
+            return DBLiveStream(id: r.id, host_id: r.host_id, title: r.title, description: r.description, status: r.status, viewer_count: r.viewer_count, started_at: r.started_at, ended_at: r.ended_at, token: nil)
+        }
+        return nil
+    }
+
+    func fetchProfileByUserId(_ userId: String) async throws -> DBProfile? {
+        let res: PostgrestResponse<[DBProfile]> = try await client
+            .from("profiles")
+            .select("*")
+            .eq("user_id", value: userId)
+            .limit(1)
+            .execute()
+        return res.value.first
     }
 
     /// Fetch a live session via Edge Function (returns stream + viewer token)
