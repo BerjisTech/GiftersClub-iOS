@@ -526,6 +526,8 @@ final class SupabaseManager: ObservableObject {
         return token
     }
 
+    // MARK: - (Realtime V2 not available in current SDK) — keep polling helpers above
+
     // MARK: - Lightweight DB fetches for live previews
     func fetchLiveStreamById(_ id: String) async throws -> DBLiveStream? {
         struct Row: Decodable { let id: String; let host_id: String; let title: String; let description: String?; let status: String; let viewer_count: Int?; let started_at: String?; let ended_at: String? }

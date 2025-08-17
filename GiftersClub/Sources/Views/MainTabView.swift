@@ -11,6 +11,7 @@ struct MainTabView: View {
     @State private var showGoLiveSetup = false
     @State private var profileRouteUsername: String? = nil
     @State private var exploreQuery: String? = nil
+    @State private var hideBottomBar: Bool = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -24,10 +25,12 @@ struct MainTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: CustomBottomBar.barHeight) }
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: hideBottomBar ? 0 : CustomBottomBar.barHeight) }
 
             // Bottom menu overlays content with equal spacing
-            CustomBottomBar(selected: $rootTab, onCompose: { showComposeChoice = true })
+            if !hideBottomBar {
+                CustomBottomBar(selected: $rootTab, onCompose: { showComposeChoice = true })
+            }
         }
         .sheet(isPresented: $showComposeChoice) {
             ComposeChoiceSheet(
@@ -67,6 +70,8 @@ struct MainTabView: View {
             showCreatePost = false
             showGoLiveSetup = false
         }
+        .onReceive(NotificationCenter.default.publisher(for: .hideBottomBar)) { _ in hideBottomBar = true }
+        .onReceive(NotificationCenter.default.publisher(for: .showBottomBar)) { _ in hideBottomBar = false }
     }
 
     private func route(_ link: DeepLink) {
@@ -91,6 +96,8 @@ extension Notification.Name {
     static let showHomeWishlists = Notification.Name("showHomeWishlists")
     static let exploreSearch = Notification.Name("exploreSearch")
     static let goHome = Notification.Name("goHome")
+    static let hideBottomBar = Notification.Name("hideBottomBar")
+    static let showBottomBar = Notification.Name("showBottomBar")
 }
 
 // MARK: - Placeholder Tab Views

@@ -8,6 +8,7 @@ struct LiveViewerView: View {
     @State private var errorText: String? = nil
     @State private var loading: Bool = true
     @State private var comments: [SupabaseManager.DBLiveStreamComment] = []
+    @State private var profilesCache: [String: SupabaseManager.DBProfile] = [:]
     @State private var newComment: String = ""
     @State private var commentsTimer: Timer? = nil
 
@@ -40,6 +41,8 @@ struct LiveViewerView: View {
         .alert("Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorText ?? "") }
+        .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil) }
+        .onDisappear { NotificationCenter.default.post(name: .showBottomBar, object: nil); commentsTimer?.invalidate(); commentsTimer = nil }
     }
 
     private var topBar: some View {
@@ -78,10 +81,15 @@ struct LiveViewerView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(comments) { c in
-                        Text("\(c.user_id.prefix(6))…: \(c.content)")
-                            .font(.footnote)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 6) {
+                            Text(username(for: c.user_id))
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.white)
+                            Text(c.content)
+                                .font(.footnote)
+                                .foregroundStyle(.white)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -98,6 +106,16 @@ struct LiveViewerView: View {
         .padding(8)
         .background(Color.black.opacity(0.25))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func username(for userId: String) -> String {
+        if let cached = profilesCache[userId] { return cached.username ?? cached.name ?? "" }
+        Task {
+            if let p = try? await supa.fetchProfileByUserId(userId) {
+                await MainActor.run { profilesCache[userId] = p }
+            }
+        }
+        return String(userId.prefix(6)) + "…"
     }
 
     private func join() async {
@@ -129,9 +147,6 @@ struct LiveViewerView: View {
     private func sendComment() async {
         let text = newComment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if let _ = try? await supa.sendLiveComment(streamId: live.id, content: text) {
-            newComment = ""
-            if let list = try? await supa.fetchLiveComments(streamId: live.id) { await MainActor.run { comments = list } }
-        }
+        if let _ = try? await supa.sendLiveComment(streamId: live.id, content: text) { newComment = "" }
     }
 }

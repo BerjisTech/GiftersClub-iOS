@@ -12,6 +12,7 @@ final class LiveKitViewer: NSObject, ObservableObject, RoomDelegate {
     @Published var remoteAudioEnabled: Bool = true
 
     private let room = Room()
+    private var trackPollTimer: Timer? = nil
 
     override init() {
         super.init()
@@ -26,20 +27,26 @@ final class LiveKitViewer: NSObject, ObservableObject, RoomDelegate {
            let vt = firstParticipant.videoTracks.first?.track as? LiveKit.VideoTrack {
             self.remoteVideoTrack = vt
         }
+        // Poll for track in case delegate signature differs; ensures video eventually binds
+        trackPollTimer?.invalidate()
+        trackPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if self.remoteVideoTrack == nil,
+               let first = self.room.remoteParticipants.values.first,
+               let vt = first.videoTracks.first?.track as? LiveKit.VideoTrack {
+                Task { @MainActor in self.remoteVideoTrack = vt }
+            }
+        }
     }
 
     func disconnect() async {
         await room.disconnect()
         self.isConnected = false
         self.remoteVideoTrack = nil
+        trackPollTimer?.invalidate(); trackPollTimer = nil
     }
 
-    // MARK: - RoomDelegate (bind first subscribed video track)
-    func room(_ room: Room, participant: RemoteParticipant, didSubscribeTrack track: Track) {
-        if let vt = track as? LiveKit.VideoTrack {
-            Task { @MainActor in self.remoteVideoTrack = vt }
-        }
-    }
+    // No delegate implementation; polling handles binding to minimize SDK signature mismatch issues.
 }
 
 #else
