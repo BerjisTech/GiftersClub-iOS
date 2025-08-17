@@ -449,6 +449,32 @@ final class SupabaseManager: ObservableObject {
         let token: String?
     }
 
+    struct DBLiveStreamWithStats: Decodable, Identifiable, Hashable {
+        let id: String
+        let host_id: String
+        let title: String
+        let description: String?
+        let status: String
+        let started_at: String?
+        let ended_at: String?
+        let viewer_count: Int?
+        let comment_count: Int?
+        let gift_count: Int?
+        let tokens_received: Int?
+        let thumbnail_url: String?
+        let stream_score: Double?
+    }
+
+    func fetchFeedLiveStreams(limit: Int = 10, query: String? = nil) async throws -> [DBLiveStreamWithStats] {
+        struct Params: Encodable { let in_viewer_id: String?; let in_limit: Int; let in_query: String? }
+        let me = user?.id.uuidString
+        let params = Params(in_viewer_id: me, in_limit: limit, in_query: query)
+        let res: PostgrestResponse<[DBLiveStreamWithStats]> = try await client
+            .rpc("feed_live_streams", params: params)
+            .execute()
+        return res.value
+    }
+
     struct DBLiveStreamComment: Decodable, Identifiable { let id: String; let live_stream_id: String; let user_id: String; let content: String; let created_at: String? }
     struct DBLiveStreamViewer: Decodable, Identifiable { let id: String; let live_stream_id: String; let viewer_id: String; let joined_at: String? }
 
@@ -469,6 +495,29 @@ final class SupabaseManager: ObservableObject {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
             throw NSError(domain: "LiveSession", code: (resp as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: msg ?? "Failed to create live session"]) }
         return try JSONDecoder().decode(DBLiveStream.self, from: data)
+    }
+
+    /// Request a viewer token for LiveKit by stream ID via Edge Function.
+    func fetchLiveViewerToken(streamId: String) async throws -> String {
+        struct Payload: Encodable { let streamId: String; let role: String }
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/live-session")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload = Payload(streamId: streamId, role: "viewer")
+        req.httpBody = try JSONEncoder().encode(payload)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw NSError(domain: "LiveViewerToken", code: (resp as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: msg ?? "Failed to fetch viewer token"])
+        }
+        let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        guard let token = json["token"] as? String else {
+            throw NSError(domain: "LiveViewerToken", code: -2, userInfo: [NSLocalizedDescriptionKey: "Missing token in response"])
+        }
+        return token
     }
 
     /// Fetch a live session via Edge Function (returns stream + viewer token)

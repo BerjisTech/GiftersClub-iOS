@@ -22,6 +22,17 @@ struct FeedPost: Identifiable, Hashable {
 
 struct HomeView: View {
     @ObservedObject private var supabase = SupabaseManager.shared
+    enum FeedItem: Identifiable, Hashable {
+        case post(FeedPost)
+        case live(SupabaseManager.DBLiveStreamWithStats)
+        var id: String {
+            switch self {
+            case .post(let p): return p.id
+            case .live(let l): return "live_\(l.id)"
+            }
+        }
+    }
+    @State private var items: [FeedItem] = []
     @State private var posts: [FeedPost] = []
     @State private var selection: Int = 0
     @State private var isLoading = false
@@ -35,9 +46,20 @@ struct HomeView: View {
         GeometryReader { proxy in
             let size = proxy.size
             let fullHeight = size.height
-            VerticalPageView(items: posts, selection: $selection) { idx, _ in
-                PostPageView(post: $posts[idx], isActive: selection == idx, bottomSafeInset: proxy.safeAreaInsets.bottom, tabBarHeight: tabBarHeight)
-                    .frame(width: size.width, height: fullHeight)
+            VerticalPageView(items: items, selection: $selection) { idx, _ in
+                let item = items[idx]
+                switch item {
+                case .post(let p):
+                    if let pIndex = posts.firstIndex(where: { $0.id == p.id }) {
+                        PostPageView(post: $posts[pIndex], isActive: selection == idx, bottomSafeInset: proxy.safeAreaInsets.bottom, tabBarHeight: tabBarHeight)
+                            .frame(width: size.width, height: fullHeight)
+                    } else {
+                        Color.black.frame(width: size.width, height: fullHeight)
+                    }
+                case .live(let live):
+                    LiveCardView(live: live)
+                        .frame(width: size.width, height: fullHeight)
+                }
             }
             .frame(width: size.width, height: fullHeight)
             .background(Color.black)
@@ -80,8 +102,12 @@ struct HomeView: View {
             if let liked = try? await supabase.fetchUserLikedPostIDs(postIDs: ids) {
                 for i in mapped.indices { mapped[i].isLiked = liked.contains(mapped[i].id) }
             }
+            // Fetch ranked live streams and interleave
+            let lives = try? await supabase.fetchFeedLiveStreams(limit: max(1, mapped.count / 3), query: nil)
+            let combined = interleave(posts: mapped, lives: lives ?? [])
             await MainActor.run {
                 posts = mapped
+                items = combined
                 selection = 0
                 offset = mapped.count
             }
@@ -98,8 +124,12 @@ struct HomeView: View {
             let rows = try await supabase.fetchFeed(limit: 10, offset: offset)
             let mapped = rows.compactMap(mapRow)
             if mapped.isEmpty { return }
+            // Refresh lives for this page and merge with existing items
+            let lives = try? await supabase.fetchFeedLiveStreams(limit: max(1, mapped.count / 3), query: nil)
+            let newItems = interleave(posts: mapped, lives: lives ?? [])
             await MainActor.run {
                 posts.append(contentsOf: mapped)
+                items.append(contentsOf: newItems)
                 offset += mapped.count
             }
         } catch {
@@ -144,6 +174,77 @@ struct HomeView: View {
             isLiked: false
         )
     }
+}
+
+// MARK: - Live card view
+struct LiveCardView: View {
+    let live: SupabaseManager.DBLiveStreamWithStats
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            ZStack {
+                if let t = live.thumbnail_url, let url = URL(string: t) {
+                    AsyncImage(url: url) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: { Color.black }
+                } else {
+                    Color.black
+                }
+                LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
+            }
+            .ignoresSafeArea()
+            .clipped()
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    NavigationLink(destination: LiveViewerView(live: live)) {
+                        Text("LIVE NOW").font(.caption.bold()).foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 4).background(Color.red).clipShape(Capsule())
+                    }
+                    Spacer()
+                    Label("\(live.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption)
+                }
+                Text(live.title).font(.headline).foregroundStyle(.white).lineLimit(2)
+            }
+            .padding()
+        }
+        .background(Color.black)
+    }
+}
+
+// MARK: - Interleave helper
+extension HomeView {
+    private func interleave(posts: [FeedPost], lives: [SupabaseManager.DBLiveStreamWithStats]) -> [FeedItem] {
+        var out: [FeedItem] = []
+        var si = 0
+        var sinceLast = 0
+        var lastHost: String? = nil
+        var insertedLives = 0
+        let maxLives = 3
+        var rng = SeededRng(seed: hashSeed("\(supabase.user?.id.uuidString ?? "anon"):0:\(posts.count)"))
+        var gap = randomGap(3, 5, &rng)
+        for p in posts {
+            out.append(.post(p))
+            sinceLast += 1
+            if sinceLast >= gap && si < lives.count && insertedLives < maxLives {
+                let live = lives[si]
+                if live.host_id != lastHost {
+                    out.append(.live(live))
+                    lastHost = live.host_id
+                    si += 1
+                    sinceLast = 0
+                    insertedLives += 1
+                    gap = randomGap(3, 5, &rng)
+                }
+            }
+        }
+        return out
+    }
+    private func randomGap(_ min: Int, _ max: Int, _ rng: inout SeededRng) -> Int { Int(rng.next() * Double(max - min + 1)) + min }
+    private func hashSeed(_ s: String) -> UInt32 {
+        var h: UInt32 = 0x811c9dc5
+        for c in s.utf8 { h ^= UInt32(c); h = h &+ (h << 1) &+ (h << 4) &+ (h << 7) &+ (h << 8) &+ (h << 24) }
+        return h
+    }
+    struct SeededRng { var x: UInt32; init(seed: UInt32) { self.x = seed == 0 ? 123456789 : seed }
+        mutating func next() -> Double { x ^= x << 13; x ^= x >> 17; x ^= x << 5; return Double(x) / Double(UInt32.max) } }
 }
 
 // MARK: - Post Page

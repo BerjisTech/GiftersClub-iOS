@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum ExploreTab: String, CaseIterable { case top = "Top", photos = "Photos", videos = "Videos", users = "Users" }
+private enum ExploreTab: String, CaseIterable { case top = "Top", photos = "Photos", videos = "Videos", users = "Users", live = "Live" }
 
 struct ExploreView: View {
     @Binding var externalQuery: String?
@@ -151,13 +151,19 @@ private struct SearchBarHeightKey: PreferenceKey {
             if let r = results {
                 switch activeTab {
                 case .top:
-                    ExploreTopGrid(posts: r.top, users: r.users) { p in selectedPost = p } onSelectUser: { u in selectedUser = u }
+                    VStack(spacing: 10) {
+                        // Live row at top when available
+                        ExploreLiveRow()
+                        ExploreTopGrid(posts: r.top, users: r.users) { p in selectedPost = p } onSelectUser: { u in selectedUser = u }
+                    }
                 case .photos:
                     ExplorePostsGrid(posts: r.photos) { p in selectedPost = p }
                 case .videos:
                     ExplorePostsGrid(posts: r.videos) { p in selectedPost = p }
                 case .users:
                     ExploreUsersList(users: r.users) { u in selectedUser = u }
+                case .live:
+                    ExploreLiveGrid()
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -215,6 +221,78 @@ private struct SearchBarHeightKey: PreferenceKey {
         guard let q = externalQuery, !q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         externalQuery = nil
         runSearch(q)
+    }
+}
+
+// MARK: - Live Explore UI Parts
+private struct ExploreLiveRow: View {
+    @State private var lives: [SupabaseManager.DBLiveStreamWithStats] = []
+    private let supabase = SupabaseManager.shared
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(lives, id: \.id) { l in
+                    NavigationLink(destination: LiveViewerView(live: l)) {
+                        LiveCardCell(live: l)
+                            .frame(width: 260, height: 150)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }.padding(.horizontal)
+        }
+        .task { await load() }
+    }
+    private func load() async {
+        let r = try? await supabase.fetchFeedLiveStreams(limit: 8, query: nil)
+        await MainActor.run { lives = r ?? [] }
+    }
+}
+
+private struct ExploreLiveGrid: View {
+    @State private var lives: [SupabaseManager.DBLiveStreamWithStats] = []
+    private let supabase = SupabaseManager.shared
+    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(lives, id: \.id) { l in
+                    NavigationLink(destination: LiveViewerView(live: l)) {
+                        LiveCardCell(live: l)
+                            .frame(height: 160)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }.padding(.horizontal)
+        }
+        .task { await load() }
+    }
+    private func load() async {
+        let r = try? await supabase.fetchFeedLiveStreams(limit: 20, query: nil)
+        await MainActor.run { lives = r ?? [] }
+    }
+}
+
+private struct LiveCardCell: View {
+    let live: SupabaseManager.DBLiveStreamWithStats
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            ZStack {
+                if let t = live.thumbnail_url, let url = URL(string: t) {
+                    AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { Color.black }
+                } else { Color.black }
+                LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("LIVE").font(.caption.bold()).foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 2).background(Color.red).clipShape(Capsule())
+                    Spacer()
+                    Label("\(live.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption2)
+                }
+                Text(live.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(2)
+            }
+            .padding(8)
+        }
+        .background(Color.black)
     }
 }
 
