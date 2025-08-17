@@ -551,6 +551,31 @@ final class SupabaseManager: ObservableObject {
         return res.value.first
     }
 
+    // MARK: - Live comments (poll + insert)
+    func fetchLiveComments(streamId: String) async throws -> [DBLiveStreamComment] {
+        let res: PostgrestResponse<[DBLiveStreamComment]> = try await client
+            .from("live_stream_comments")
+            .select("id,live_stream_id,user_id,content,created_at")
+            .eq("live_stream_id", value: streamId)
+            .order("created_at", ascending: true)
+            .execute()
+        return res.value
+    }
+
+    func sendLiveComment(streamId: String, content: String) async throws -> DBLiveStreamComment? {
+        guard let me = user?.id.uuidString else { return nil }
+        let res: PostgrestResponse<[DBLiveStreamComment]> = try await client
+            .from("live_stream_comments")
+            .insert([[
+                "live_stream_id": streamId,
+                "user_id": me,
+                "content": content
+            ]])
+            .select("*")
+            .execute()
+        return res.value.first
+    }
+
     /// Fetch a live session via Edge Function (returns stream + viewer token)
     func fetchLiveSession(_ id: String) async throws -> DBLiveStream {
         var comps = URLComponents(url: SupabaseConfig.url.appendingPathComponent("functions/v1/live-session"), resolvingAgainstBaseURL: false)!

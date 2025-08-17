@@ -58,8 +58,15 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
 
 struct LKVideoView: UIViewRepresentable {
     let track: LiveKit.VideoTrack?
-    func makeUIView(context: Context) -> LiveKit.VideoView { LiveKit.VideoView() }
-    func updateUIView(_ uiView: LiveKit.VideoView, context: Context) { uiView.track = track }
+    func makeUIView(context: Context) -> LiveKit.VideoView {
+        let v = LiveKit.VideoView()
+        v.contentMode = .scaleAspectFit
+        return v
+    }
+    func updateUIView(_ uiView: LiveKit.VideoView, context: Context) {
+        uiView.contentMode = .scaleAspectFit
+        uiView.track = track
+    }
 }
 
 #else

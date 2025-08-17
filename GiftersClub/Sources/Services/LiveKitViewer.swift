@@ -34,10 +34,9 @@ final class LiveKitViewer: NSObject, ObservableObject, RoomDelegate {
         self.remoteVideoTrack = nil
     }
 
-    // MARK: - RoomDelegate
-    // Delegate: publication subscribed -> bind video track
-    func room(_ room: Room, participant: RemoteParticipant, didSubscribeTrack publication: TrackPublication) {
-        if let vt = publication.track as? LiveKit.VideoTrack {
+    // MARK: - RoomDelegate (bind first subscribed video track)
+    func room(_ room: Room, participant: RemoteParticipant, didSubscribeTrack track: Track) {
+        if let vt = track as? LiveKit.VideoTrack {
             Task { @MainActor in self.remoteVideoTrack = vt }
         }
     }
