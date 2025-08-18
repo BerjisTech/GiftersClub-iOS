@@ -237,6 +237,7 @@ private struct ExploreLiveRow: View {
                             .frame(width: 260, height: 150)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
+                    .simultaneousGesture(TapGesture().onEnded { NotificationCenter.default.post(name: .hideBottomBar, object: nil) })
                 }
             }.padding(.horizontal)
         }
@@ -261,6 +262,7 @@ private struct ExploreLiveGrid: View {
                             .frame(height: 160)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
+                    .simultaneousGesture(TapGesture().onEnded { NotificationCenter.default.post(name: .hideBottomBar, object: nil) })
                 }
             }.padding(.horizontal)
         }

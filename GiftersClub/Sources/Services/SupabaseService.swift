@@ -543,6 +543,26 @@ final class SupabaseManager: ObservableObject {
         return nil
     }
 
+    // Join/leave live stream to update viewer_count via trigger
+    func recordViewerJoin(streamId: String) async {
+        guard let me = user?.id.uuidString else { return }
+        _ = try? await client
+            .from("live_stream_viewers")
+            .insert([["live_stream_id": streamId, "viewer_id": me]])
+            .select("id")
+            .execute()
+    }
+
+    func recordViewerLeave(streamId: String) async {
+        guard let me = user?.id.uuidString else { return }
+        _ = try? await client
+            .from("live_stream_viewers")
+            .delete()
+            .eq("live_stream_id", value: streamId)
+            .eq("viewer_id", value: me)
+            .execute()
+    }
+
     func fetchProfileByUserId(_ userId: String) async throws -> DBProfile? {
         let res: PostgrestResponse<[DBProfile]> = try await client
             .from("profiles")

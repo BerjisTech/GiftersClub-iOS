@@ -48,14 +48,16 @@ struct LiveViewerView: View {
         .background(Color.black)
         .toolbar(.hidden, for: .navigationBar)
         .task {
-            await join(); await loadComments(); await startStatusPolling()
+            await join()
+            await supa.recordViewerJoin(streamId: live.id)
+            await loadComments(); await startStatusPolling()
             if let row = try? await supa.fetchLiveStreamById(live.id) { viewerCount = row.viewer_count ?? 0 }
         }
         .alert("Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorText ?? "") }
         .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil) }
-        .onDisappear { NotificationCenter.default.post(name: .showBottomBar, object: nil); commentsTimer?.invalidate(); commentsTimer = nil; statusTimer?.invalidate(); statusTimer = nil }
+        .onDisappear { NotificationCenter.default.post(name: .showBottomBar, object: nil); commentsTimer?.invalidate(); commentsTimer = nil; statusTimer?.invalidate(); statusTimer = nil; Task { await supa.recordViewerLeave(streamId: live.id) } }
     }
 
     private var topBar: some View {
@@ -138,8 +140,16 @@ struct LiveViewerView: View {
         loading = true
         defer { Task { await MainActor.run { loading = false } } }
         do {
-            let token = try await supa.fetchLiveViewerToken(streamId: live.id)
-            try await viewer.connect(url: SupabaseConfig.livekitURL, token: token)
+            // Try session first, then viewer token
+            var token: String? = nil
+            if let session = try? await supa.fetchLiveSession(live.id), let t = session.token, !t.isEmpty {
+                token = t
+            } else {
+                token = try? await supa.fetchLiveViewerToken(streamId: live.id)
+            }
+            guard let tok = token, !tok.isEmpty else {
+                throw NSError(domain: "LiveKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing LiveKit token"]) }
+            try await viewer.connect(url: SupabaseConfig.livekitURL, token: tok)
             // In case tracks were already present, try to bind first available video
             if viewer.remoteVideoTrack == nil {
                 // No-op here: LiveKitViewer will set via delegate when subscribed
@@ -208,9 +218,10 @@ struct LiveViewerView: View {
             Task {
                 if let row = try? await supa.fetchLiveStreamById(live.id) {
                     if row.status != "live" {
+                    // Disconnect first, then update UI
+                    await viewer.disconnect()
                     await MainActor.run {
                         ended = true
-                        Task { await viewer.disconnect() }
                         NotificationCenter.default.post(name: .showBottomBar, object: nil)
                     }
                     if suggestions.isEmpty {

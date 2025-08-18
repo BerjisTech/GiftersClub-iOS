@@ -209,26 +209,26 @@ struct LiveCardView: View {
             }
             .ignoresSafeArea()
             .clipped()
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    NavigationLink(destination: LiveViewerView(live: live)) {
+            NavigationLink(destination: LiveViewerView(live: live)) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
                         Text("LIVE NOW").font(.caption.bold()).foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 4).background(Color.red).clipShape(Capsule())
+                        Spacer()
+                        Label("\(viewerCount ?? live.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption)
                     }
-                    Spacer()
-                    Label("\(viewerCount ?? live.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption)
+                    HStack(spacing: 8) {
+                        if let img = profile?.image, let url = URL(string: img) {
+                            AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                                .frame(width: 28, height: 28)
+                                .clipShape(Circle())
+                        } else { Circle().fill(Color.white.opacity(0.2)).frame(width: 28, height: 28) }
+                        Text(profile?.name ?? profile?.username ?? "").foregroundStyle(.white).font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    Text(live.title).font(.headline).foregroundStyle(.white).lineLimit(2)
                 }
-                HStack(spacing: 8) {
-                    if let img = profile?.image, let url = URL(string: img) {
-                        AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
-                            .frame(width: 28, height: 28)
-                            .clipShape(Circle())
-                    } else { Circle().fill(Color.white.opacity(0.2)).frame(width: 28, height: 28) }
-                    Text(profile?.name ?? profile?.username ?? "").foregroundStyle(.white).font(.subheadline.weight(.semibold))
-                    Spacer()
-                }
-                Text(live.title).font(.headline).foregroundStyle(.white).lineLimit(2)
+                .padding()
             }
-            .padding()
         }
         .background(Color.black)
         .task {
