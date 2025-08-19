@@ -41,6 +41,7 @@ struct HomeView: View {
     @State private var tabBarHeight: CGFloat = 0
     @State private var sharePost: FeedPost? = nil
     @State private var isLoadingMore = false
+    @State private var selectedLive: SupabaseManager.DBLiveStreamWithStats? = nil
 
     var body: some View {
         GeometryReader { proxy in
@@ -57,8 +58,14 @@ struct HomeView: View {
                         Color.black.frame(width: size.width, height: fullHeight)
                     }
                 case .live(let live):
-                    LiveCardView(live: live)
-                        .frame(width: size.width, height: fullHeight)
+                    Button(action: { selectedLive = live }) {
+                        LiveCardView(live: live)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .frame(width: size.width, height: fullHeight)
+                    .zIndex(10)
                 }
             }
             .frame(width: size.width, height: fullHeight)
@@ -86,6 +93,9 @@ struct HomeView: View {
             if newIndex >= posts.count - 3 {
                 Task { await loadMoreIfNeeded() }
             }
+        }
+        .navigationDestination(item: $selectedLive) { live in
+            LiveViewerView(live: live)
         }
     }
 
@@ -195,50 +205,59 @@ struct LiveCardView: View {
     @State private var viewerCount: Int? = nil
     @State private var timer: Timer? = nil
     private let supabase = SupabaseManager.shared
+    @StateObject private var previewViewer = LiveKitViewer()
+    var onOpen: () -> Void = {}
     var body: some View {
         ZStack(alignment: .bottom) {
-            ZStack {
-                if let t = live.thumbnail_url, let url = URL(string: t) {
-                    AsyncImage(url: url) { img in
-                        img.resizable().scaledToFill()
-                    } placeholder: { Color.black }
-                } else {
-                    Color.black
+            if previewViewer.remoteVideoTrack != nil {
+                LKVideoView(track: previewViewer.remoteVideoTrack)
+                    .scaleEffect(x: -1, y: 1)
+                    .ignoresSafeArea()
+            } else {
+                ZStack {
+                    if let t = live.thumbnail_url, let url = URL(string: t) {
+                        AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { Color.black }
+                    } else { Color.black }
+                    LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
                 }
-                LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
-            .clipped()
-            NavigationLink(destination: LiveViewerView(live: live)) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Text("LIVE NOW").font(.caption.bold()).foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 4).background(Color.red).clipShape(Capsule())
-                        Spacer()
-                        Label("\(viewerCount ?? live.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption)
-                    }
-                    HStack(spacing: 8) {
-                        if let img = profile?.image, let url = URL(string: img) {
-                            AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
-                                .frame(width: 28, height: 28)
-                                .clipShape(Circle())
-                        } else { Circle().fill(Color.white.opacity(0.2)).frame(width: 28, height: 28) }
-                        Text(profile?.name ?? profile?.username ?? "").foregroundStyle(.white).font(.subheadline.weight(.semibold))
-                        Spacer()
-                    }
-                    Text(live.title).font(.headline).foregroundStyle(.white).lineLimit(2)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text("LIVE NOW").font(.caption.bold()).foregroundStyle(.white).padding(.horizontal, 8).padding(.vertical, 4).background(Color.red).clipShape(Capsule())
+                    Spacer()
+                    Label("\(viewerCount ?? live.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption)
                 }
-                .padding()
+                HStack(spacing: 8) {
+                    if let img = profile?.image, let url = URL(string: img) {
+                        AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                            .frame(width: 28, height: 28)
+                            .clipShape(Circle())
+                    } else { Circle().fill(Color.white.opacity(0.2)).frame(width: 28, height: 28) }
+                    Text(profile?.name ?? profile?.username ?? "").foregroundStyle(.white).font(.subheadline.weight(.semibold))
+                    Spacer()
+                }
+                Text(live.title).font(.headline).foregroundStyle(.white).lineLimit(2)
             }
+            .padding()
         }
         .background(Color.black)
+        .contentShape(Rectangle())
         .task {
             if profile == nil { if let p = try? await supabase.fetchProfileByUserId(live.host_id) { await MainActor.run { profile = p } } }
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { _ in
                 Task { if let row = try? await supabase.fetchLiveStreamById(live.id) { await MainActor.run { viewerCount = row.viewer_count } } }
             }
+            // Inline live preview
+            do {
+                var token: String? = nil
+                if let session = try? await supabase.fetchLiveSession(live.id), let t = session.token, !t.isEmpty { token = t }
+                else { token = try? await supabase.fetchLiveViewerToken(streamId: live.id) }
+                if let tok = token, !tok.isEmpty { try? await previewViewer.connect(url: SupabaseConfig.livekitURL, token: tok) }
+            }
         }
-        .onDisappear { timer?.invalidate(); timer = nil }
+        .onDisappear { timer?.invalidate(); timer = nil; Task { await previewViewer.disconnect() } }
     }
 }
 

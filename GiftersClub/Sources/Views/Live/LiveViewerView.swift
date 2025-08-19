@@ -15,6 +15,7 @@ struct LiveViewerView: View {
     @State private var ended: Bool = false
     @State private var suggestions: [SupabaseManager.DBLiveStreamWithStats] = []
     @State private var viewerCount: Int = 0
+    @State private var hostProfile: SupabaseManager.DBProfile? = nil
 
     var body: some View {
         ZStack {
@@ -52,6 +53,9 @@ struct LiveViewerView: View {
             await supa.recordViewerJoin(streamId: live.id)
             await loadComments(); await startStatusPolling()
             if let row = try? await supa.fetchLiveStreamById(live.id) { viewerCount = row.viewer_count ?? 0 }
+            if hostProfile == nil, let p = try? await supa.fetchProfileByUserId(live.host_id) {
+                await MainActor.run { hostProfile = p }
+            }
         }
         .alert("Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
@@ -61,12 +65,36 @@ struct LiveViewerView: View {
     }
 
     private var topBar: some View {
-        HStack {
+        HStack(alignment: .center, spacing: 8) {
+            HStack(spacing: 8) {
+                if let img = hostProfile?.image, let url = URL(string: img) {
+                    AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                        .frame(width: 28, height: 28)
+                        .clipShape(Circle())
+                } else {
+                    Circle().fill(Color.white.opacity(0.25)).frame(width: 28, height: 28)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(hostProfile?.username ?? "")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    if let f = hostProfile?.followers_count {
+                        Text("\(f) followers")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.35))
+            .clipShape(Capsule())
+
+            Spacer()
+
             HStack(spacing: 8) {
                 Circle().fill(.red).frame(width: 8, height: 8)
-                Text("LIVE")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
+                Text("LIVE").font(.subheadline.weight(.bold)).foregroundStyle(.white)
                 Label("\(viewerCount)", systemImage: "eye.fill")
                     .foregroundStyle(.white.opacity(0.9))
                     .font(.footnote)
@@ -75,8 +103,6 @@ struct LiveViewerView: View {
             .padding(.vertical, 6)
             .background(Color.black.opacity(0.35))
             .clipShape(Capsule())
-
-            Spacer()
 
             Button { Task { await viewer.disconnect(); dismiss() } } label: {
                 Text("Close")

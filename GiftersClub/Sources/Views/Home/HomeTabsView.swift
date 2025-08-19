@@ -5,6 +5,7 @@ enum HomeTopTab: String, CaseIterable { case posts = "Posts", gifts = "Gifts", g
 struct HomeTabsView: View {
     @State private var tab: HomeTopTab = .posts
     private let tabsHeight: CGFloat = 20
+    @State private var hideChrome: Bool = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -12,7 +13,10 @@ struct HomeTabsView: View {
             Group {
                 switch tab {
                 case .posts:
-                    HomeView() // posts fills from top of parent; tabs float above
+                    NavigationStack {
+                        HomeView()
+                            .padding(.bottom, hideChrome ? 0 : CustomBottomBar.barHeight)
+                    } // enable navigation from feed live cards
                 case .gifts:
                     GiftsHomeView().padding(.top, tabsHeight)
                 case .gifters:
@@ -24,14 +28,19 @@ struct HomeTabsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // Floating top tabs (no background)
-            VStack(spacing: 0) {
-                TopTabsBar(tab: $tab, onDark: tab == .posts)
-                    .frame(height: tabsHeight)
-                    .padding(.horizontal)
+            if !hideChrome {
+                VStack(spacing: 0) {
+                    TopTabsBar(tab: $tab, onDark: tab == .posts)
+                        .frame(height: tabsHeight)
+                        .padding(.horizontal)
+                }
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
         }
         .onReceive(NotificationCenter.default.publisher(for: .showHomeWishlists)) { _ in tab = .wishlists }
+        // Sync with LiveViewer requests to hide bottom bar; hide top tabs too for immersive live view
+        .onReceive(NotificationCenter.default.publisher(for: .hideBottomBar)) { _ in hideChrome = true }
+        .onReceive(NotificationCenter.default.publisher(for: .showBottomBar)) { _ in hideChrome = false }
     }
 }
 
