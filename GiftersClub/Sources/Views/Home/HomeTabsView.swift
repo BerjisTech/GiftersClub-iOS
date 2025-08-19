@@ -1,4 +1,5 @@
 import SwiftUI
+import Supabase
 
 enum HomeTopTab: String, CaseIterable { case posts = "Posts", gifts = "Gifts", gifters = "Gifters", wishlists = "Wishlists" }
 
@@ -6,6 +7,8 @@ struct HomeTabsView: View {
     @State private var tab: HomeTopTab = .posts
     private let tabsHeight: CGFloat = 20
     @State private var hideChrome: Bool = false
+    @State private var showUpdateBanner: Bool = false
+    @State private var updateBannerText: String = ""
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -36,11 +39,98 @@ struct HomeTabsView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
+
+            // Update banner (iOS) below tabs
+            if showUpdateBanner && !hideChrome {
+                HStack(spacing: 12) {
+                    Text(updateBannerText)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Button("Dismiss") { withAnimation { showUpdateBanner = false } }
+                        .buttonStyle(.bordered)
+                }
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal)
+                .padding(.top, tabsHeight + 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showHomeWishlists)) { _ in tab = .wishlists }
         // Sync with LiveViewer requests to hide bottom bar; hide top tabs too for immersive live view
         .onReceive(NotificationCenter.default.publisher(for: .hideBottomBar)) { _ in hideChrome = true }
         .onReceive(NotificationCenter.default.publisher(for: .showBottomBar)) { _ in hideChrome = false }
+        .task { await checkAppVersionAndPrompt() }
+    }
+}
+
+// MARK: - Version check
+extension HomeTabsView {
+    private func checkAppVersionAndPrompt() async {
+        let supa = SupabaseManager.shared
+        guard let userId = supa.user?.id.uuidString else { return }
+        // Determine current build/version as Int
+        let bundle = Bundle.main
+        let versionName = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let buildStr = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        let currentVersion: Int = {
+            if let n = versionName, let v = Int(n) { return v }
+            if let b = buildStr, let v = Int(b) { return v }
+            return 0
+        }()
+        do {
+            // Upsert user's app entry
+            struct UA: Decodable { let id: String; let version_number: Int }
+            let lastRes: PostgrestResponse<[UA]> = try await supa.client
+                .from("user_apps")
+                .select("id,version_number")
+                .eq("user_id", value: userId)
+                .eq("platform", value: "ios")
+                .order("date_installed", ascending: false)
+                .limit(1)
+                .execute()
+            if lastRes.value.first?.version_number != currentVersion {
+                if let last = lastRes.value.first {
+                    struct UAUpdate: Encodable { let updated_at: String }
+                    _ = try? await supa.client
+                        .from("user_apps")
+                        .update(UAUpdate(updated_at: "now()"))
+                        .eq("id", value: last.id)
+                        .select("id")
+                        .execute()
+                }
+                struct UAInsert: Encodable { let user_id: String; let platform: String; let version_number: Int; let date_installed: String }
+                let payload = UAInsert(user_id: userId, platform: "ios", version_number: currentVersion, date_installed: "now()")
+                _ = try? await supa.client
+                    .from("user_apps")
+                    .insert(payload)
+                    .select("id")
+                    .execute()
+            }
+            // Fetch latest published version for iOS
+            struct Row: Decodable { let version_number: Int }
+            let latestRes: PostgrestResponse<[Row]> = try await supa.client
+                .from("user_apps")
+                .select("version_number")
+                .eq("platform", value: "ios")
+                .order("version_number", ascending: false)
+                .limit(1)
+                .execute()
+            let latest = latestRes.value.first?.version_number ?? currentVersion
+            if currentVersion < latest {
+                let diff = latest - currentVersion
+                await MainActor.run {
+                    updateBannerText = "You are \(diff) version\(diff > 1 ? "s" : "") behind. Update GiftersClub for the best experience."
+                    withAnimation { showUpdateBanner = true }
+                }
+            } else {
+                await MainActor.run { withAnimation { showUpdateBanner = false } }
+            }
+        } catch {
+            // Ignore failures
+        }
     }
 }
 

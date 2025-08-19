@@ -13,6 +13,7 @@ struct MainTabView: View {
     @State private var exploreQuery: String? = nil
     @State private var hideBottomBar: Bool = false
 
+    @ObservedObject private var network = NetworkMonitor.shared
     var body: some View {
         ZStack(alignment: .bottom) {
             // Fullscreen content behind the bottom bar
@@ -30,6 +31,21 @@ struct MainTabView: View {
             // Bottom menu overlays content with equal spacing
             if !hideBottomBar {
                 CustomBottomBar(selected: $rootTab, onCompose: { showComposeChoice = true })
+            }
+            // No-internet overlay for iOS
+            if !network.isReachable {
+                VStack(spacing: 8) {
+                    Text("No internet connection").font(.subheadline.weight(.semibold))
+                    Text("Some features may not work until you're back online.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .sheet(isPresented: $showComposeChoice) {
