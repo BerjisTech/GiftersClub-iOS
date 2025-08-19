@@ -92,17 +92,37 @@ struct LiveViewerView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 8) {
-            // Comments list (simple overlay)
+            // Comments list (simple overlay: avatar, username + gifter badge, comment)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(comments) { c in
-                        HStack(spacing: 6) {
-                            Text(username(for: c.user_id))
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.white)
-                            Text(c.content)
-                                .font(.footnote)
-                                .foregroundStyle(.white)
+                        HStack(alignment: .top, spacing: 8) {
+                            if let p = profilesCache[c.user_id], let urlStr = p.image, let url = URL(string: urlStr) {
+                                AsyncImage(url: url) { img in
+                                    img.resizable().scaledToFill()
+                                } placeholder: { Color.white.opacity(0.2) }
+                                .frame(width: 20, height: 20)
+                                .clipShape(Circle())
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(username(for: c.user_id))
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                    if let p = profilesCache[c.user_id], let lvl = p.gifter_level, lvl > 0 {
+                                        Text("Lv \(lvl)")
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.white.opacity(0.25))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                Text(c.content)
+                                    .font(.footnote)
+                                    .foregroundStyle(.white)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }

@@ -100,6 +100,9 @@ final class SupabaseManager: ObservableObject {
         let tokens_received: Int?
         let gifts_sent: Int?
         let gifts_received: Int?
+        // Gifter badge fields
+        let gifter_level: Int?
+        let gifter_level_name: String?
     }
 
     struct DBPost: Decodable { let id: String; let user_id: String }
