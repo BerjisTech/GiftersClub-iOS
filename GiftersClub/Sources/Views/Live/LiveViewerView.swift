@@ -108,7 +108,7 @@ struct LiveViewerView: View {
                                 HStack(spacing: 6) {
                                     Text(username(for: c.user_id))
                                         .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(userColor(c.user_id))
                                     if let p = profilesCache[c.user_id], let lvl = p.gifter_level, lvl > 0 {
                                         Text("Lv \(lvl)")
                                             .font(.caption2.weight(.bold))
@@ -188,6 +188,13 @@ struct LiveViewerView: View {
                 }
             }
         }
+    }
+
+    private func userColor(_ id: String) -> Color {
+        var hash: UInt64 = 5381
+        for u in id.utf8 { hash = ((hash << 5) &+ hash) &+ UInt64(u) }
+        let hue = Double(hash % 360) / 360.0
+        return Color(hue: hue, saturation: 0.75, brightness: 0.95)
     }
 
     private func sendComment() async {
