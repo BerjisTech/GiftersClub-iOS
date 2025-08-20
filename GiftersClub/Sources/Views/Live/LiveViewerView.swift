@@ -1,4 +1,5 @@
 import SwiftUI
+import Supabase
 
 struct LiveViewerView: View {
     let live: SupabaseManager.DBLiveStreamWithStats
@@ -16,6 +17,7 @@ struct LiveViewerView: View {
     @State private var suggestions: [SupabaseManager.DBLiveStreamWithStats] = []
     @State private var viewerCount: Int = 0
     @State private var hostProfile: SupabaseManager.DBProfile? = nil
+    @State private var isFollowing: Bool? = nil
 
     var body: some View {
         ZStack {
@@ -56,12 +58,25 @@ struct LiveViewerView: View {
             if hostProfile == nil, let p = try? await supa.fetchProfileByUserId(live.host_id) {
                 await MainActor.run { hostProfile = p }
             }
+            // Preload follow state for viewer
+            if let me = supa.user?.id.uuidString, me != live.host_id {
+                struct Row: Decodable { let id: String }
+                if let res: PostgrestResponse<[Row]> = try? await supa.client
+                    .from("follows").select("id")
+                    .eq("followed_id", value: live.host_id)
+                    .eq("follower_id", value: me)
+                    .limit(1)
+                    .execute() {
+                    await MainActor.run { isFollowing = !(res.value.isEmpty) }
+                }
+            }
         }
         .alert("Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorText ?? "") }
         .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil) }
         .onDisappear { NotificationCenter.default.post(name: .showBottomBar, object: nil); commentsTimer?.invalidate(); commentsTimer = nil; statusTimer?.invalidate(); statusTimer = nil; Task { await supa.recordViewerLeave(streamId: live.id) } }
+        .onChange(of: ended) { _, isEnded in if isEnded { NotificationCenter.default.post(name: .showBottomBar, object: nil) } }
     }
 
     private var topBar: some View {
@@ -84,6 +99,13 @@ struct LiveViewerView: View {
                             .foregroundStyle(.white.opacity(0.9))
                     }
                 }
+                if let me = supa.user?.id.uuidString, me != live.host_id {
+                    Button(action: { Task { await toggleFollow() } }) {
+                        Image(systemName: (isFollowing ?? false) ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.plus")
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.leading, 6)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -94,7 +116,6 @@ struct LiveViewerView: View {
 
             HStack(spacing: 8) {
                 Circle().fill(.red).frame(width: 8, height: 8)
-                Text("LIVE").font(.subheadline.weight(.bold)).foregroundStyle(.white)
                 Label("\(viewerCount)", systemImage: "eye.fill")
                     .foregroundStyle(.white.opacity(0.9))
                     .font(.footnote)
@@ -162,6 +183,12 @@ struct LiveViewerView: View {
                     Text("Send")
                 }
                 .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if let uname = hostProfile?.username {
+                    Button(action: { NotificationCenter.default.post(name: .showGifterProfile, object: uname) }) {
+                        Image(systemName: "gift.fill")
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
         }
         .padding(8)
@@ -229,6 +256,27 @@ struct LiveViewerView: View {
         if let _ = try? await supa.sendLiveComment(streamId: live.id, content: text) { newComment = "" }
     }
 
+    private func toggleFollow() async {
+        guard let me = supa.user?.id.uuidString else { return }
+        do {
+            if isFollowing == true {
+                _ = try await supa.client
+                    .from("follows").delete()
+                    .eq("followed_id", value: live.host_id)
+                    .eq("follower_id", value: me)
+                    .execute()
+                await MainActor.run { isFollowing = false }
+            } else {
+                struct F: Encodable { let followed_id: String; let follower_id: String }
+                _ = try await supa.client
+                    .from("follows").insert(F(followed_id: live.host_id, follower_id: me))
+                    .select("id")
+                    .execute()
+                await MainActor.run { isFollowing = true }
+            }
+        } catch { }
+    }
+
     // MARK: - Ended state and suggestions
     private var endedView: some View {
         VStack(spacing: 12) {
@@ -277,13 +325,15 @@ struct LiveViewerView: View {
                         ended = true
                         NotificationCenter.default.post(name: .showBottomBar, object: nil)
                     }
-                    if suggestions.isEmpty {
+                        if await suggestions.isEmpty {
                         if let lives = try? await supa.fetchFeedLiveStreams(limit: 4, query: nil) {
                             await MainActor.run { suggestions = lives }
                         }
                     }
                     } else {
                         await MainActor.run { viewerCount = row.viewer_count ?? 0 }
+                        // Reinforce hiding bottom chrome while viewing
+                        NotificationCenter.default.post(name: .hideBottomBar, object: nil)
                     }
                 }
             }
