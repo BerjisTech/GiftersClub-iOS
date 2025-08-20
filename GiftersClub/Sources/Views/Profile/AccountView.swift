@@ -9,6 +9,7 @@ struct AccountView: View {
     @State private var openWishlists = 0
     @State private var fulfilledWishlists = 0
     @State private var showTopUp = false
+    @State private var showWithdrawals = false
     @StateObject private var banners = BannerQueue()
 
     var body: some View {
@@ -45,9 +46,7 @@ struct AccountView: View {
                         }
                         HStack(spacing: 10) {
                             GradientButton(title: "Buy Tokens") { showTopUp = true }
-                            NavigationLink(destination: WithdrawalsView()) {
-                                GradientButton(title: "Withdraw") {}
-                            }
+                            GradientButton(title: "Withdraw") { showWithdrawals = true }
                         }
                     }
                     .padding(16)
@@ -103,6 +102,7 @@ struct AccountView: View {
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .navigationDestination(isPresented: $showWithdrawals) { WithdrawalsView() }
         .sheet(isPresented: $showTopUp, onDismiss: { Task { await load() } }) {
             TokenTopUpSheet(onCompleted: { success in
                 if success {
