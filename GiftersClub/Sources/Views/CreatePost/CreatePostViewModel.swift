@@ -32,6 +32,9 @@ final class CreatePostViewModel: ObservableObject {
     @Published var media: [MediaItem] = []
     @Published var isPosting: Bool = false
     @Published var errorMessage: String? = nil
+    // Subscription plan scope for subscription-only posts
+    @Published var availablePlans: [SupabaseManager.DBSubscriptionPlan] = []
+    @Published var selectedPlanId: String? = nil // nil = All subscribers
 
     // Text post canvas rendered image placeholder (treated as photo)
     func addRenderedTextImage(_ image: UIImage) {
@@ -79,7 +82,8 @@ final class CreatePostViewModel: ObservableObject {
     private func createPostRow() async throws -> String {
         let type = accessType.rawValue
         let price: Int? = accessType == .paid ? Int(priceText) : nil
-        guard let post = try await SupabaseManager.shared.createPost(content: caption, accessType: type, price: price) else {
+        let requiredPlanId: String? = (accessType == .subscription) ? selectedPlanId : nil
+        guard let post = try await SupabaseManager.shared.createPost(content: caption, accessType: type, price: price, requiredPlanId: requiredPlanId) else {
             throw URLError(.badServerResponse)
         }
         return post.id

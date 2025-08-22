@@ -21,6 +21,7 @@ struct PostViewer: View {
     @State private var showLike = false
     @State private var showDislike = false
     @State private var liked = false
+    @State private var viewStart: Date? = nil
 
     var overlaysHidden: Bool { magnify > 1.01 || isPaused }
 
@@ -56,6 +57,13 @@ struct PostViewer: View {
         .simultaneousGesture(doubleTap)
         .background(Color.black.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { viewStart = Date() }
+        .onDisappear {
+            if let start = viewStart {
+                let dur = Int(Date().timeIntervalSince(start))
+                Task { await SupabaseManager.shared.logPostView(postId: model.id, viewDuration: dur) }
+            }
+        }
     }
 
     @ViewBuilder

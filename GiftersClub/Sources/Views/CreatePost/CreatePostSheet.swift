@@ -189,6 +189,33 @@ struct CreatePostSheet: View {
                 }
             }
             .pickerStyle(.segmented)
+            .onChange(of: vm.accessType) { _, t in
+                if t == .subscription { Task { await loadMyPlans() } }
+            }
+
+            if vm.accessType == .subscription {
+                if vm.availablePlans.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("You have no subscription plans.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Button("Create a subscription plan") { showSettings = true }
+                            .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Who can view this post?")
+                            .font(.subheadline.weight(.semibold))
+                        Picker("Audience", selection: Binding(get: { vm.selectedPlanId ?? "__all__" }, set: { vm.selectedPlanId = ($0 == "__all__" ? nil : $0) })) {
+                            Text("All subscribers").tag("__all__")
+                            ForEach(vm.availablePlans, id: \.id) { p in
+                                Text("\(p.name) — \(p.tokens)").tag(p.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+            }
 
             if vm.accessType == .paid {
                 TextField("Price (tokens)", text: $vm.priceText)
@@ -204,6 +231,28 @@ struct CreatePostSheet: View {
                         banners.show(Banner(title: "Enter a valid price in tokens", style: .warning))
                         return
                     }
+                } else if vm.accessType == .subscription {
+                    // Require at least one subscription plan before allowing a subscription post
+                    Task {
+                        if let me = SupabaseManager.shared.user?.id.uuidString {
+                            let plans = vm.availablePlans
+                            if plans.isEmpty {
+                                await MainActor.run {
+                                    banners.show(Banner(title: "Create a subscription plan first (Profile → Settings → Subscriptions)", style: .warning))
+                                }
+                                return
+                            } else {
+                                await MainActor.run { vm.publish { _ in
+                                    banners.show(Banner(title: "Your post has been created", style: .success))
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                        NotificationCenter.default.post(name: .goHome, object: nil)
+                                        dismiss()
+                                    }
+                                } }
+                            }
+                        }
+                    }
+                    return
                 }
                 vm.publish { _ in
                     banners.show(Banner(title: "Your post has been created", style: .success))
@@ -216,10 +265,22 @@ struct CreatePostSheet: View {
             .disabled(vm.isPosting)
         }
         .padding()
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { SettingsView() }
+        }
         .alert("Error", isPresented: Binding(get: { vm.errorMessage != nil }, set: { _ in vm.errorMessage = nil })) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(vm.errorMessage ?? "")
+        }
+    }
+
+    @State private var showSettings = false
+    private func loadMyPlans() async {
+        guard let me = SupabaseManager.shared.user?.id.uuidString else { return }
+        if let plans = try? await SupabaseManager.shared.fetchSubscriptionPlans(creatorId: me) {
+            let sorted = plans.sorted { $0.tokens < $1.tokens }
+            await MainActor.run { vm.availablePlans = sorted; vm.selectedPlanId = nil }
         }
     }
 }

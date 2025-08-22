@@ -95,7 +95,7 @@ struct HomeView: View {
             }
         }
         .navigationDestination(item: $selectedLive) { live in
-            LiveViewerView(live: live)
+            LiveEntryDestination(live: live)
         }
     }
 

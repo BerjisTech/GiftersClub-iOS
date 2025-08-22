@@ -59,6 +59,8 @@ private struct SettingsDetailView: View {
     @State private var subDuration: String = "one_time"
     @State private var subEditingPlanId: String? = nil
     @State private var subSaving: Bool = false
+    @State private var subBenefitInput: String = ""
+    @State private var subBenefits: [String] = []
 
     var body: some View {
         ScrollView {
@@ -180,6 +182,14 @@ private struct SettingsDetailView: View {
                     VStack(alignment: .leading) {
                         Text(plan.name).font(.subheadline.weight(.semibold))
                         Text("\(plan.tokens) tokens • \(plan.duration_type)").font(.caption).foregroundStyle(.secondary)
+                        if let desc = plan.description, !desc.isEmpty {
+                            let lines = desc.split(separator: "\n").map(String.init)
+                            if !lines.isEmpty {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(lines, id: \.self) { line in Text("• \(line)").font(.caption2) }
+                                }
+                            }
+                        }
                     }
                     Spacer()
                     Button { subEditingPlanId = plan.id; subName = plan.name; subDescription = plan.description ?? ""; subTokens = String(plan.tokens); subDuration = plan.duration_type } label: { Image(systemName: "pencil") }
@@ -196,6 +206,20 @@ private struct SettingsDetailView: View {
                 TextField("Description (optional)", text: $subDescription)
                 TextField("Tokens", text: $subTokens).keyboardType(.numberPad)
                 Picker("Duration", selection: $subDuration) { Text("One-time").tag("one_time"); Text("Monthly").tag("monthly"); Text("Annual").tag("annual") }.pickerStyle(.segmented)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Plan goodies/services").font(.subheadline)
+                    HStack(spacing: 8) {
+                        TextField("Add a benefit (e.g., weekly shoutouts)", text: $subBenefitInput)
+                        Button(action: { let t = subBenefitInput.trimmingCharacters(in: .whitespacesAndNewlines); guard !t.isEmpty else { return }; subBenefits.append(t); subBenefitInput = "" }) { Image(systemName: "plus.circle.fill") }
+                            .buttonStyle(.plain)
+                    }
+                    if !subBenefits.isEmpty {
+                        ForEach(subBenefits, id: \.self) { b in
+                            HStack { Text("• \(b)").font(.caption); Spacer(); Button(role: .destructive) { subBenefits.removeAll { $0 == b } } label: { Image(systemName: "trash") }.buttonStyle(.plain) }
+                        }
+                    }
+                    Text("These will be shown to fans on the paywall.").font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     if subEditingPlanId != nil { Button("Cancel") { resetPlanForm() } }
                     Spacer()
@@ -268,17 +292,31 @@ private struct SettingsDetailView: View {
     }
     // Subscriptions helpers
     private func loadPlans() async { guard let me = supabase.user?.id.uuidString else { return }; subPlans = (try? await supabase.fetchSubscriptionPlans(creatorId: me)) ?? [] }
-    private func resetPlanForm() { subEditingPlanId = nil; subName = ""; subDescription = ""; subTokens = ""; subDuration = "one_time" }
+    private func resetPlanForm() { subEditingPlanId = nil; subName = ""; subDescription = ""; subTokens = ""; subDuration = "one_time"; subBenefits = []; subBenefitInput = "" }
     private func savePlan() async {
         guard let tokens = Int(subTokens), tokens > 0, !subName.trimmingCharacters(in: .whitespaces).isEmpty else { banners.show(Banner(title: "Name and valid tokens required", style: .error)); return }
         if subEditingPlanId == nil && subPlans.count >= 5 { banners.show(Banner(title: "Maximum of 5 plans allowed", style: .warning)); return }
         subSaving = true; defer { subSaving = false }
         do {
-            if let id = subEditingPlanId { let updates = SupabaseManager.UpdateSubscriptionPlanInput(name: subName, description: subDescription.isEmpty ? nil : subDescription, tokens: tokens, duration_type: subDuration); _ = try await supabase.updateSubscriptionPlan(id: id, updates: updates); banners.show(Banner(title: "Plan updated", style: .success)) }
-            else { _ = try await supabase.createSubscriptionPlan(name: subName, description: subDescription.isEmpty ? nil : subDescription, tokens: tokens, durationType: subDuration); banners.show(Banner(title: "Plan created", style: .success)) }
+            // Persist benefits inside description lines until backend adds a dedicated field
+            let composedDesc: String? = {
+                let base = subDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                let lines = subBenefits
+                if base.isEmpty && lines.isEmpty { return nil }
+                if lines.isEmpty { return base }
+                if base.isEmpty { return lines.joined(separator: "\n") }
+                return ([base] + lines).joined(separator: "\n")
+            }()
+            if let id = subEditingPlanId {
+                let updates = SupabaseManager.UpdateSubscriptionPlanInput(name: subName, description: composedDesc, tokens: tokens, duration_type: subDuration)
+                _ = try await supabase.updateSubscriptionPlan(id: id, updates: updates)
+                banners.show(Banner(title: "Plan updated", style: .success))
+            } else {
+                _ = try await supabase.createSubscriptionPlan(name: subName, description: composedDesc, tokens: tokens, durationType: subDuration)
+                banners.show(Banner(title: "Plan created", style: .success))
+            }
             await loadPlans(); resetPlanForm()
         } catch { banners.show(Banner(title: "Failed to save plan", style: .error)) }
     }
     private func deletePlan(_ id: String) async { do { try await supabase.deleteSubscriptionPlan(id: id); await loadPlans(); banners.show(Banner(title: "Plan deleted", style: .success)) } catch { banners.show(Banner(title: "Failed to delete plan", style: .error)) } }
 }
-

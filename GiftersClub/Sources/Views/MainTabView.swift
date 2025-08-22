@@ -12,6 +12,10 @@ struct MainTabView: View {
     @State private var profileRouteUsername: String? = nil
     @State private var exploreQuery: String? = nil
     @State private var hideBottomBar: Bool = false
+    @State private var liveCheckTimer: Timer? = nil
+    @State private var resumeLive: SupabaseManager.DBLiveStream? = nil
+    @ObservedObject private var supabase = SupabaseManager.shared
+    @StateObject private var banners = BannerQueue()
 
     @ObservedObject private var network = NetworkMonitor.shared
     var body: some View {
@@ -27,6 +31,13 @@ struct MainTabView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaInset(edge: .bottom) { Color.clear.frame(height: hideBottomBar ? 0 : CustomBottomBar.barHeight) }
+
+            // Global banner host
+            VStack { Spacer(minLength: 0) }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .overlay(alignment: .top) {
+                    BannerHost().environmentObject(banners)
+                }
 
             // Bottom menu overlays content with equal spacing
             if !hideBottomBar {
@@ -56,6 +67,9 @@ struct MainTabView: View {
         }
         .fullScreenCover(isPresented: $showCreatePost) { CreatePostCameraView() }
         .fullScreenCover(isPresented: $showGoLiveSetup) { GoLiveSetupView() }
+        .fullScreenCover(item: $resumeLive) { stream in
+            LiveBroadcastView(stream: stream)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
             programmaticSelectProfile = true
             if let u = note.object as? String { profileRouteUsername = u }
@@ -88,6 +102,8 @@ struct MainTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .hideBottomBar)) { _ in hideBottomBar = true }
         .onReceive(NotificationCenter.default.publisher(for: .showBottomBar)) { _ in hideBottomBar = false }
+        .task { startLiveResumePolling() }
+        .onDisappear { liveCheckTimer?.invalidate(); liveCheckTimer = nil }
     }
 
     private func route(_ link: DeepLink) {
@@ -101,6 +117,30 @@ struct MainTabView: View {
                 name: .showGifterProfile,
                 object: username
             )
+        }
+    }
+
+    private func startLiveResumePolling() {
+        liveCheckTimer?.invalidate()
+        liveCheckTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { _ in
+            Task { await checkActiveLiveAndMaybeBanner() }
+        }
+        Task { await checkActiveLiveAndMaybeBanner() }
+    }
+
+    private func checkActiveLiveAndMaybeBanner() async {
+        guard !hideBottomBar else { return }
+        guard supabase.user != nil else { return }
+        if let active = try? await supabase.fetchActiveLiveForCurrentUser() {
+            await MainActor.run {
+                banners.show(Banner(title: "You are live — Resume streaming", style: .info, action: {
+                    Task {
+                        if let s = try? await supabase.fetchLiveSession(active.id) {
+                            await MainActor.run { resumeLive = s }
+                        }
+                    }
+                }, duration: 5))
+            }
         }
     }
 }

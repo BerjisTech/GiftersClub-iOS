@@ -164,6 +164,7 @@ final class SupabaseManager: ObservableObject {
         let content: String?
         let access_type: String?
         let price: Int?
+        let required_plan_id: String?
         let created_at: String?
         let like_count: Int?
         let comment_count: Int?
@@ -325,6 +326,7 @@ final class SupabaseManager: ObservableObject {
         let content: String?
         let access_type: String?
         let price: Int?
+        let required_plan_id: String?
         let media: [FeedRPCMedia]?
         let profile: FeedRPCProfile?
         static func == (lhs: ExplorePost, rhs: ExplorePost) -> Bool { lhs.id == rhs.id }
@@ -452,6 +454,17 @@ final class SupabaseManager: ObservableObject {
         let token: String?
     }
 
+    // MARK: - System Categories
+    struct DBSystemCategory: Decodable, Identifiable { let id: Int; let name: String; let description: String? }
+    func fetchSystemCategories() async throws -> [DBSystemCategory] {
+        let res: PostgrestResponse<[DBSystemCategory]> = try await client
+            .from("system_categories")
+            .select("id,name,description")
+            .order("name", ascending: true)
+            .execute()
+        return res.value
+    }
+
     struct DBLiveStreamWithStats: Decodable, Identifiable, Hashable {
         let id: String
         let host_id: String
@@ -485,8 +498,8 @@ final class SupabaseManager: ObservableObject {
     struct DBLiveStreamViewer: Decodable, Identifiable { let id: String; let live_stream_id: String; let viewer_id: String; let joined_at: String? }
 
     /// Create a live session via Edge Function (returns stream + LiveKit token for host)
-    func createLiveSession(title: String, description: String?) async throws -> DBLiveStream {
-        struct Payload: Encodable { let hostId: String; let title: String; let description: String? }
+    func createLiveSession(title: String, description: String?, categoryId: Int?, tags: [String]?) async throws -> DBLiveStream {
+        struct Payload: Encodable { let hostId: String; let title: String; let description: String?; let categoryId: Int?; let tags: [String]? }
         guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
         let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/live-session")
         var req = URLRequest(url: functionURL)
@@ -494,13 +507,52 @@ final class SupabaseManager: ObservableObject {
         req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
         if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        let payload = Payload(hostId: me, title: title, description: description)
+        let payload = Payload(hostId: me, title: title, description: description, categoryId: categoryId, tags: tags)
         req.httpBody = try JSONEncoder().encode(payload)
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
             throw NSError(domain: "LiveSession", code: (resp as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: msg ?? "Failed to create live session"]) }
         return try JSONDecoder().decode(DBLiveStream.self, from: data)
+    }
+
+    // MARK: - Posts View Tracking
+    func logPostView(postId: String, viewDuration: Int?) async {
+        guard let _ = user?.id.uuidString else { return }
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/log-post-view")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        var payload: [String: Any] = ["postId": postId, "platform": "ios"]
+        if let d = viewDuration { payload["viewDuration"] = d }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
+    // MARK: - Gift events for live (polling)
+    struct DBGiftEvent: Decodable, Identifiable {
+        let id: String
+        let live_stream_id: String
+        let gifter: String
+        let recipient: String
+        let gift: String
+        let tokens_used: Int?
+        let created_at: String
+        let gift_row: DBGift?
+        let gifter_row: DBProfile?
+    }
+    func fetchGiftEvents(streamId: String, since: String?) async throws -> [DBGiftEvent] {
+        var filter = client
+            .from("gift_sent")
+            .select("id,live_stream_id,gifter,recipient,gift,tokens_used,created_at,gift_row:gifts(*),gifter_row:profiles(*)")
+            .eq("live_stream_id", value: streamId)
+        if let s = since { filter = filter.gt("created_at", value: s) }
+        let res: PostgrestResponse<[DBGiftEvent]> = try await filter
+            .order("created_at", ascending: true)
+            .execute()
+        return res.value
     }
 
     /// Request a viewer token for LiveKit by stream ID via Edge Function.
@@ -544,6 +596,20 @@ final class SupabaseManager: ObservableObject {
             return DBLiveStream(id: r.id, host_id: r.host_id, title: r.title, description: r.description, status: r.status, viewer_count: r.viewer_count, started_at: r.started_at, ended_at: r.ended_at, token: nil)
         }
         return nil
+    }
+
+    /// Active live stream for the current user as host (if any)
+    func fetchActiveLiveForCurrentUser() async throws -> DBLiveStream? {
+        guard let me = user?.id.uuidString else { return nil }
+        let res: PostgrestResponse<[DBLiveStream]> = try await client
+            .from("live_streams")
+            .select("id,host_id,title,description,status,viewer_count,started_at,ended_at")
+            .eq("host_id", value: me)
+            .eq("status", value: "live")
+            .order("started_at", ascending: false)
+            .limit(1)
+            .execute()
+        return res.value.first
     }
 
     // Join/leave live stream to update viewer_count via trigger
@@ -1008,12 +1074,13 @@ final class SupabaseManager: ObservableObject {
         let content: String
         let access_type: String
         let price: Int?
+        let required_plan_id: String?
     }
     struct DBPostRow: Decodable { let id: String; let user_id: String }
     /// Create a new post row. Returns DBPostRow with id.
-    func createPost(content: String, accessType: String = "free", price: Int? = nil) async throws -> DBPostRow? {
+    func createPost(content: String, accessType: String = "free", price: Int? = nil, requiredPlanId: String? = nil) async throws -> DBPostRow? {
         let me = try await resolvedUserId(explicit: nil)
-        let payload = CreatePostInsert(user_id: me, content: content, access_type: accessType, price: price)
+        let payload = CreatePostInsert(user_id: me, content: content, access_type: accessType, price: price, required_plan_id: requiredPlanId)
         let res: PostgrestResponse<[DBPostRow]> = try await client
             .from("posts")
             .insert([payload])

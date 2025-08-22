@@ -11,19 +11,44 @@ struct PaywallSheet: View {
     @State private var topUpSucceeded = false
     var onUnlocked: (() -> Void)? = nil
     @State private var errorText: String? = nil
+    @State private var plans: [SupabaseManager.DBSubscriptionPlan] = []
+    @State private var selectedPlanId: String? = nil
+    @State private var creatorUsername: String? = nil
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
                 Image(systemName: "lock.fill").font(.largeTitle)
                 switch mode {
-                case .subscription:
-                    Text("Subscribe to view").font(.headline)
-                    Picker("Billing", selection: $duration) {
-                        Text("Monthly").tag(SupabaseManager.SubscriptionDuration.monthly)
+                case .subscription(let creatorId):
+                    Text("Subscribe to @\(creatorUsername ?? "creator")").font(.headline)
+                    if plans.isEmpty {
+                        Text("This creator has no subscription plans available.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("Plan", selection: Binding(get: { selectedPlanId ?? plans.first?.id }, set: { selectedPlanId = $0 })) {
+                                ForEach(plans, id: \.id) { p in
+                                    Text("\(p.name) — \(p.tokens) tokens / \(p.duration_type)").tag(p.id as String?)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            let plan = plans.first { $0.id == (selectedPlanId ?? plans.first?.id) }
+                            if let p = plan {
+                                GradientButton(title: isLoading ? "Subscribing…" : "Subscribe for \(p.tokens) tokens") { Task { await doSubscribe(plan: p) } }
+                                if let desc = p.description, !desc.isEmpty {
+                                    let lines = desc.split(separator: "\n").map(String.init)
+                                    if !lines.isEmpty {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            ForEach(lines, id: \.self) { line in Text("• \(line)").font(.caption) }
+                                        }
+                                        .padding(.top, 4)
+                                    }
+                                }
+                            }
+                        }
                     }
-                    .pickerStyle(.segmented)
-                    GradientButton(title: isLoading ? "Subscribing…" : "Subscribe") { Task { await doSubscribe() } }
                 case .paid(_, let price):
                     Text("Purchase to view").font(.headline)
                     GradientButton(title: isLoading ? "Unlocking…" : "Unlock for \(price) tokens", state: isLoading ? .loading : .normal) { Task { await doPurchase() } }
@@ -35,8 +60,33 @@ struct PaywallSheet: View {
             .navigationTitle("Locked Content")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
         }
+        .task {
+            if case let .subscription(creatorId) = mode {
+                if let list = try? await supabase.fetchSubscriptionPlans(creatorId: creatorId) {
+                    let sorted = list.sorted { $0.tokens < $1.tokens }
+                    await MainActor.run { plans = sorted; selectedPlanId = sorted.first?.id }
+                }
+                if let prof = try? await supabase.fetchProfileByUserId(creatorId) {
+                    await MainActor.run { creatorUsername = prof.username }
+                }
+            }
+        }
         .sheet(isPresented: $showTopUp, onDismiss: {
-            if topUpSucceeded { Task { await doPurchase() }; topUpSucceeded = false } else { isLoading = false }
+            if topUpSucceeded {
+                Task {
+                    switch mode {
+                    case .paid:
+                        await doPurchase()
+                    case .subscription:
+                        if let plan = plans.first(where: { $0.id == (selectedPlanId ?? plans.first?.id) }) {
+                            await doSubscribe(plan: plan)
+                        }
+                    }
+                }
+                topUpSucceeded = false
+            } else {
+                isLoading = false
+            }
         }) {
             TokenTopUpSheet(onCompleted: { success in topUpSucceeded = success })
         }
@@ -46,12 +96,19 @@ struct PaywallSheet: View {
         } message: { Text(errorText ?? "") }
     }
 
-    private func doSubscribe() async {
+    private func doSubscribe(plan: SupabaseManager.DBSubscriptionPlan) async {
         guard case let .subscription(creatorId) = mode else { return }
         await MainActor.run { isLoading = true }
         defer { Task { await MainActor.run { isLoading = false } } }
         do {
-            try await supabase.subscribeToCreator(creatorId: creatorId, tokens: 0, duration: duration)
+            // Enforce local balance
+            if let me = supabase.user?.id.uuidString, let prof = try? await supabase.fetchProfile(username: nil, userId: me), (prof.token_balance ?? 0) < plan.tokens {
+                await MainActor.run { isLoading = false; topUpSucceeded = false; showTopUp = true }
+                return
+            }
+            // Map duration type to enum; default monthly
+            let dur = SupabaseManager.SubscriptionDuration(rawValue: plan.duration_type) ?? .monthly
+            try await supabase.subscribeToCreator(creatorId: creatorId, tokens: plan.tokens, duration: dur)
             await MainActor.run { onUnlocked?(); dismiss() }
         } catch {
             await MainActor.run { errorText = "Subscription failed. Please try again." }

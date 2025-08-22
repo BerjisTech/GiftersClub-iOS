@@ -232,7 +232,7 @@ private struct ExploreLiveRow: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
                 ForEach(lives, id: \.id) { l in
-                    NavigationLink(destination: LiveViewerView(live: l)) {
+                    NavigationLink(destination: LiveEntryDestination(live: l)) {
                         LiveCardCell(live: l)
                             .frame(width: 260, height: 150)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -257,7 +257,7 @@ private struct ExploreLiveGrid: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(lives, id: \.id) { l in
-                    NavigationLink(destination: LiveViewerView(live: l)) {
+                    NavigationLink(destination: LiveEntryDestination(live: l)) {
                         LiveCardCell(live: l)
                             .frame(height: 160)
                             .clipShape(RoundedRectangle(cornerRadius: 12))

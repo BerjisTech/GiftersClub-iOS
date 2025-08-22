@@ -18,6 +18,9 @@ struct LiveViewerView: View {
     @State private var viewerCount: Int = 0
     @State private var hostProfile: SupabaseManager.DBProfile? = nil
     @State private var isFollowing: Bool? = nil
+    @State private var giftsTimer: Timer? = nil
+    @State private var lastGiftAt: String? = nil
+    @State private var giftCombos: [String: (count: Int, index: Int)] = [:]
 
     var body: some View {
         ZStack {
@@ -46,6 +49,14 @@ struct LiveViewerView: View {
                     bottomBar
                 }
                 .padding()
+                .zIndex(2)
+                // Placeholder overlay for special gift animations (to be implemented)
+                .overlay(alignment: .center) {
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("GiftAnimationOverlay")
+                }
             }
         }
         .background(Color.black)
@@ -54,7 +65,9 @@ struct LiveViewerView: View {
             await join()
             await supa.recordViewerJoin(streamId: live.id)
             await loadComments(); await startStatusPolling()
-            if let row = try? await supa.fetchLiveStreamById(live.id) { viewerCount = row.viewer_count ?? 0 }
+            if let row = try? await supa.fetchLiveStreamById(live.id) {
+                await MainActor.run { viewerCount = row.viewer_count ?? 0 }
+            }
             if hostProfile == nil, let p = try? await supa.fetchProfileByUserId(live.host_id) {
                 await MainActor.run { hostProfile = p }
             }
@@ -70,12 +83,43 @@ struct LiveViewerView: View {
                     await MainActor.run { isFollowing = !(res.value.isEmpty) }
                 }
             }
+            // Gifts polling: append combo notifications into comments
+            giftsTimer?.invalidate();
+            giftsTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true, block: { _ in
+                Task {
+                    let since = await MainActor.run { lastGiftAt }
+                    let events = try? await supa.fetchGiftEvents(streamId: live.id, since: since)
+                    guard let evs = events, !evs.isEmpty else { return }
+                    await MainActor.run {
+                        lastGiftAt = evs.last?.created_at
+                        var newItems: [SupabaseManager.DBLiveStreamComment] = []
+                        for e in evs {
+                            let uname = e.gifter_row?.username ?? String(e.gifter.prefix(6))
+                            let gname = e.gift_row?.name ?? "gift"
+                            let key = e.gifter + "_" + e.gift
+                            if var combo = giftCombos[key] {
+                                combo.count += 1
+                                giftCombos[key] = combo
+                                let idx = combo.index
+                                if idx < comments.count {
+                                    comments[idx] = SupabaseManager.DBLiveStreamComment(id: comments[idx].id, live_stream_id: comments[idx].live_stream_id, user_id: comments[idx].user_id, content: "\(uname) sent a \(combo.count)x \(gname) combo", created_at: comments[idx].created_at)
+                                }
+                            } else {
+                                let c = SupabaseManager.DBLiveStreamComment(id: "gift-\(UUID().uuidString)", live_stream_id: live.id, user_id: e.gifter, content: "\(uname) sent a \(gname)", created_at: e.created_at)
+                                newItems.append(c)
+                                giftCombos[key] = (count: 1, index: comments.count + newItems.count - 1)
+                            }
+                        }
+                        comments.append(contentsOf: newItems)
+                    }
+                }
+            })
         }
         .alert("Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorText ?? "") }
         .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil) }
-        .onDisappear { NotificationCenter.default.post(name: .showBottomBar, object: nil); commentsTimer?.invalidate(); commentsTimer = nil; statusTimer?.invalidate(); statusTimer = nil; Task { await supa.recordViewerLeave(streamId: live.id) } }
+        .onDisappear { NotificationCenter.default.post(name: .showBottomBar, object: nil); commentsTimer?.invalidate(); commentsTimer = nil; statusTimer?.invalidate(); statusTimer = nil; giftsTimer?.invalidate(); giftsTimer = nil; Task { await supa.recordViewerLeave(streamId: live.id) } }
         .onChange(of: ended) { _, isEnded in if isEnded { NotificationCenter.default.post(name: .showBottomBar, object: nil) } }
     }
 
@@ -125,7 +169,7 @@ struct LiveViewerView: View {
             .background(Color.black.opacity(0.35))
             .clipShape(Capsule())
 
-            Button { Task { await viewer.disconnect(); dismiss() } } label: {
+            Button { Task { await viewer.disconnect(); await MainActor.run { dismiss() } } } label: {
                 Text("Close")
                     .font(.subheadline.bold())
                     .foregroundStyle(.white)
@@ -186,14 +230,19 @@ struct LiveViewerView: View {
                 if let uname = hostProfile?.username {
                     Button(action: { NotificationCenter.default.post(name: .showGifterProfile, object: uname) }) {
                         Image(systemName: "gift.fill")
+                            .foregroundStyle(.white)
+                            .frame(minWidth: 44, minHeight: 36)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.bordered)
                 }
             }
+            .contentShape(Rectangle())
         }
         .padding(8)
         .background(Color.black.opacity(0.25))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .zIndex(3)
     }
 
     private func username(for userId: String) -> String {
@@ -253,7 +302,9 @@ struct LiveViewerView: View {
     private func sendComment() async {
         let text = newComment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if let _ = try? await supa.sendLiveComment(streamId: live.id, content: text) { newComment = "" }
+        if let _ = try? await supa.sendLiveComment(streamId: live.id, content: text) {
+            await MainActor.run { newComment = "" }
+        }
     }
 
     private func toggleFollow() async {
@@ -288,7 +339,7 @@ struct LiveViewerView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 10) {
                         ForEach(suggestions, id: \.id) { s in
-                            NavigationLink(destination: LiveViewerView(live: s)) {
+                            NavigationLink(destination: LiveEntryDestination(live: s)) {
                                 ZStack(alignment: .bottomLeading) {
                                     if let t = s.thumbnail_url, let url = URL(string: t) {
                                         AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { Color.black }
@@ -325,7 +376,8 @@ struct LiveViewerView: View {
                         ended = true
                         NotificationCenter.default.post(name: .showBottomBar, object: nil)
                     }
-                        if await suggestions.isEmpty {
+                        let isEmpty = await MainActor.run { suggestions.isEmpty }
+                        if isEmpty {
                         if let lives = try? await supa.fetchFeedLiveStreams(limit: 4, query: nil) {
                             await MainActor.run { suggestions = lives }
                         }
