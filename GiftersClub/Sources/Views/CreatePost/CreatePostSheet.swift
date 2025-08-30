@@ -234,22 +234,20 @@ struct CreatePostSheet: View {
                 } else if vm.accessType == .subscription {
                     // Require at least one subscription plan before allowing a subscription post
                     Task {
-                        if let me = SupabaseManager.shared.user?.id.uuidString {
-                            let plans = vm.availablePlans
-                            if plans.isEmpty {
-                                await MainActor.run {
-                                    banners.show(Banner(title: "Create a subscription plan first (Profile → Settings → Subscriptions)", style: .warning))
-                                }
-                                return
-                            } else {
-                                await MainActor.run { vm.publish { _ in
-                                    banners.show(Banner(title: "Your post has been created", style: .success))
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                                        NotificationCenter.default.post(name: .goHome, object: nil)
-                                        dismiss()
-                                    }
-                                } }
+                        let plans = vm.availablePlans
+                        if plans.isEmpty {
+                            await MainActor.run {
+                                banners.show(Banner(title: "Create a subscription plan first (Profile → Settings → Subscriptions)", style: .warning))
                             }
+                            return
+                        } else {
+                            await MainActor.run { vm.publish { _ in
+                                banners.show(Banner(title: "Your post has been created", style: .success))
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                    NotificationCenter.default.post(name: .goHome, object: nil)
+                                    dismiss()
+                                }
+                            } }
                         }
                     }
                     return

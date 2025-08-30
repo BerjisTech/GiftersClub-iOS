@@ -14,6 +14,8 @@ struct MainTabView: View {
     @State private var hideBottomBar: Bool = false
     @State private var liveCheckTimer: Timer? = nil
     @State private var resumeLive: SupabaseManager.DBLiveStream? = nil
+    struct LiveLink: Identifiable { let id: String; let manage: Bool; let setupMatch: Bool }
+    @State private var deepLinkLive: LiveLink? = nil
     @ObservedObject private var supabase = SupabaseManager.shared
     @StateObject private var banners = BannerQueue()
 
@@ -70,6 +72,9 @@ struct MainTabView: View {
         .fullScreenCover(item: $resumeLive) { stream in
             LiveBroadcastView(stream: stream)
         }
+        .fullScreenCover(item: $deepLinkLive) { ctx in
+            LiveEntryByIdView(liveId: ctx.id, startManagePanel: ctx.manage, setupMatch: ctx.setupMatch)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
             programmaticSelectProfile = true
             if let u = note.object as? String { profileRouteUsername = u }
@@ -117,6 +122,8 @@ struct MainTabView: View {
                 name: .showGifterProfile,
                 object: username
             )
+        case .live(let id, let manage, let setup):
+            deepLinkLive = LiveLink(id: id, manage: manage, setupMatch: setup)
         }
     }
 

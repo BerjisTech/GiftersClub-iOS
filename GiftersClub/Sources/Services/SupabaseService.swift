@@ -453,6 +453,50 @@ final class SupabaseManager: ObservableObject {
         // Edge function may attach an ephemeral LiveKit token for host/viewer
         let token: String?
     }
+    /// Create a scheduled live stream row directly (status = scheduled)
+    func createScheduledLiveStream(
+        title: String,
+        description: String?,
+        categoryId: Int?,
+        tags: [String]?,
+        scheduledAtISO: String,
+        accessType: String?,
+        price: Int?,
+        requiredPlanId: String?
+    ) async throws -> DBLiveStream {
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        struct Insert: Encodable {
+            let host_id: String
+            let title: String
+            let description: String?
+            let category_id: Int?
+            let tags: [String]?
+            let status: String
+            let started_at: String
+            let access_type: String?
+            let price: Int?
+            let required_plan_id: String?
+        }
+        let payload = Insert(
+            host_id: me,
+            title: title,
+            description: description,
+            category_id: categoryId,
+            tags: tags,
+            status: "scheduled",
+            started_at: scheduledAtISO,
+            access_type: accessType,
+            price: price,
+            required_plan_id: requiredPlanId
+        )
+        let res: PostgrestResponse<[DBLiveStream]> = try await client
+            .from("live_streams")
+            .insert([payload])
+            .select("id,host_id,title,description,status,viewer_count,started_at,ended_at")
+            .execute()
+        guard let row = res.value.first else { throw URLError(.badServerResponse) }
+        return row
+    }
 
     // MARK: - System Categories
     struct DBSystemCategory: Decodable, Identifiable { let id: Int; let name: String; let description: String? }
@@ -555,6 +599,17 @@ final class SupabaseManager: ObservableObject {
         return res.value
     }
 
+    // Lightweight gift row lookup
+    func fetchGiftById(_ id: String) async throws -> DBGift? {
+        let res: PostgrestResponse<[DBGift]> = try await client
+            .from("gifts")
+            .select("id,name,tokens,image")
+            .eq("id", value: id)
+            .limit(1)
+            .execute()
+        return res.value.first
+    }
+
     /// Request a viewer token for LiveKit by stream ID via Edge Function.
     func fetchLiveViewerToken(streamId: String) async throws -> String {
         struct Payload: Encodable { let action: String; let streamId: String; let type: String }
@@ -583,6 +638,226 @@ final class SupabaseManager: ObservableObject {
 
     // MARK: - (Realtime V2 not available in current SDK) — keep polling helpers above
 
+    // MARK: - Multi-host helpers (shared room_id)
+    /// Return all cohosted stream ids (same room_id), including the provided id.
+    func fetchCohostStreamIds(streamId: String) async throws -> [String] {
+        struct Row: Decodable { let id: String; let room_id: String? }
+        let s: PostgrestResponse<[Row]> = try await client
+            .from("live_streams")
+            .select("id,room_id")
+            .eq("id", value: streamId)
+            .limit(1)
+            .execute()
+        guard let roomId = s.value.first?.room_id, !roomId.isEmpty else { return [streamId] }
+        let sibs: PostgrestResponse<[Row]> = try await client
+            .from("live_streams")
+            .select("id")
+            .eq("room_id", value: roomId)
+            .execute()
+        var ids = Set([streamId])
+        sibs.value.forEach { ids.insert($0.id) }
+        return Array(ids)
+    }
+
+    /// Fetch comments across multiple stream ids (for cohosted streams sharing room_id)
+    func fetchLiveCommentsMulti(streamIds: [String]) async throws -> [DBLiveStreamComment] {
+        if streamIds.isEmpty { return [] }
+        let res: PostgrestResponse<[DBLiveStreamComment]> = try await client
+            .from("live_stream_comments")
+            .select("id,live_stream_id,user_id,content,created_at")
+            .in("live_stream_id", values: streamIds)
+            .order("created_at", ascending: true)
+            .execute()
+        return res.value
+    }
+
+    // MARK: - Matches (battles)
+    struct DBBattleSession: Decodable { let id: String; let live_stream_id: String; let started_at: String; let ends_at: String?; let status: String }
+    struct DBBattleParticipant: Decodable { let id: String; let battle_id: String; let user_id: String; let team: Int?; let live_stream_id: String }
+
+    /// Active battle for a given stream (if any)
+    func fetchActiveBattleForStream(streamId: String) async throws -> DBBattleSession? {
+        let res: PostgrestResponse<[DBBattleSession]> = try await client
+            .from("battle_sessions")
+            .select("id,live_stream_id,started_at,ends_at,status")
+            .eq("live_stream_id", value: streamId)
+            .eq("status", value: "active")
+            .order("started_at", ascending: false)
+            .limit(1)
+            .execute()
+        return res.value.first
+    }
+
+    func fetchBattleParticipants(battleId: String) async throws -> [DBBattleParticipant] {
+        let res: PostgrestResponse<[DBBattleParticipant]> = try await client
+            .from("battle_participants")
+            .select("id,battle_id,user_id,team,live_stream_id")
+            .eq("battle_id", value: battleId)
+            .execute()
+        return res.value
+    }
+
+    /// Sum tokens_used per recipient since battle start
+    func fetchBattleTalliesSince(startedAtIso: String, userIds: [String]) async throws -> [String: Int] {
+        if userIds.isEmpty { return [:] }
+        struct Row: Decodable { let recipient: String; let tokens_used: Int? }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("gift_sent")
+            .select("recipient,tokens_used,created_at")
+            .in("recipient", values: userIds)
+            .gte("created_at", value: startedAtIso)
+            .execute()
+        var tally: [String: Int] = [:]
+        for r in res.value { tally[r.recipient] = (tally[r.recipient] ?? 0) + (r.tokens_used ?? 0) }
+        return tally
+    }
+
+    // MARK: - Battle mutations (host)
+    struct DBBattleSessionRow: Decodable { let id: String }
+    func createBattle(streamId: String) async throws -> DBBattleSessionRow? {
+        struct Insert: Encodable { let live_stream_id: String; let status: String; let started_at: String }
+        let now = ISO8601DateFormatter().string(from: Date())
+        let res: PostgrestResponse<[DBBattleSessionRow]> = try await client
+            .from("battle_sessions")
+            .insert([Insert(live_stream_id: streamId, status: "active", started_at: now)])
+            .select("id")
+            .execute()
+        return res.value.first
+    }
+    func endBattle(battleId: String) async throws {
+        let now = ISO8601DateFormatter().string(from: Date())
+        _ = try await client
+            .from("battle_sessions")
+            .update(["status": "ended", "ends_at": now])
+            .eq("id", value: battleId)
+            .execute()
+    }
+    func addBattleParticipant(battleId: String, userId: String, streamId: String?, team: Int?) async throws {
+        struct Insert: Encodable { let battle_id: String; let user_id: String; let live_stream_id: String?; let team: Int? }
+        _ = try await client
+            .from("battle_participants")
+            .insert([Insert(battle_id: battleId, user_id: userId, live_stream_id: streamId, team: team)])
+            .execute()
+    }
+    func updateBattleParticipantTeam(participantId: String, team: Int?) async throws {
+        struct UpdateTeam: Encodable { let team: Int? }
+        _ = try await client
+            .from("battle_participants")
+            .update(UpdateTeam(team: team))
+            .eq("id", value: participantId)
+            .execute()
+    }
+    func deleteBattleParticipant(participantId: String) async throws {
+        _ = try await client
+            .from("battle_participants")
+            .delete()
+            .eq("id", value: participantId)
+            .execute()
+    }
+
+    // MARK: - Guest invites (Edge function 'live-invite')
+    func requestGuestInvite(streamId: String) async -> Bool {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/live-invite")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["action": "request", "streamId": streamId]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return false }
+            return true
+        } catch { return false }
+    }
+
+    func listPendingGuestInvites(streamId: String) async -> [[String: Any]] {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/live-invite")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["action": "list", "streamId": streamId]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return [] }
+            let json = (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
+            return json
+        } catch { return [] }
+    }
+
+    func acceptGuestInvite(inviteId: String) async -> Bool {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/live-invite")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["action": "accept", "inviteId": inviteId]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return false }
+            return true
+        } catch { return false }
+    }
+
+    func inviteGuestByUsername(streamId: String, username: String) async -> Bool {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/live-invite")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["action": "invite", "streamId": streamId, "username": username]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return false }
+            return true
+        } catch { return false }
+    }
+
+    /// Poll my latest invite status for this stream
+    func fetchMyInviteStatus(streamId: String) async -> (id: String, status: String)? {
+        guard let me = user?.id.uuidString else { return nil }
+        struct Row: Decodable { let id: String; let invitee_id: String; let live_stream_id: String; let status: String; let created_at: String }
+        let res: PostgrestResponse<[Row]>? = try? await client
+            .from("live_stream_invites")
+            .select("id,invitee_id,live_stream_id,status,created_at")
+            .eq("live_stream_id", value: streamId)
+            .eq("invitee_id", value: me)
+            .order("created_at", ascending: false)
+            .limit(1)
+            .execute()
+        if let r = res?.value.first { return (id: r.id, status: r.status) }
+        return nil
+    }
+
+    /// Guest LiveKit token via function (type: guest)
+    func fetchLiveGuestToken(streamId: String) async throws -> String {
+        struct Payload: Encodable { let action: String; let streamId: String; let type: String }
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/live-session")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload = Payload(action: "token", streamId: streamId, type: "guest")
+        req.httpBody = try JSONEncoder().encode(payload)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw NSError(domain: "LiveGuestToken", code: (resp as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: msg ?? "Failed to fetch guest token"])
+        }
+        let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        guard let token = json["token"] as? String else { throw NSError(domain: "LiveGuestToken", code: -2, userInfo: [NSLocalizedDescriptionKey: "Missing token in response"]) }
+        return token
+    }
+
     // MARK: - Lightweight DB fetches for live previews
     func fetchLiveStreamById(_ id: String) async throws -> DBLiveStream? {
         struct Row: Decodable { let id: String; let host_id: String; let title: String; let description: String?; let status: String; let viewer_count: Int?; let started_at: String?; let ended_at: String? }
@@ -605,6 +880,19 @@ final class SupabaseManager: ObservableObject {
             .from("live_streams")
             .select("id,host_id,title,description,status,viewer_count,started_at,ended_at")
             .eq("host_id", value: me)
+            .eq("status", value: "live")
+            .order("started_at", ascending: false)
+            .limit(1)
+            .execute()
+        return res.value.first
+    }
+
+    /// Active live stream for a specific user as host (if any)
+    func fetchActiveLiveForUser(userId: String) async throws -> DBLiveStream? {
+        let res: PostgrestResponse<[DBLiveStream]> = try await client
+            .from("live_streams")
+            .select("id,host_id,title,description,status,viewer_count,started_at,ended_at")
+            .eq("host_id", value: userId)
             .eq("status", value: "live")
             .order("started_at", ascending: false)
             .limit(1)
@@ -1417,6 +1705,84 @@ final class SupabaseManager: ObservableObject {
     private static func decodeRecord(_ record: [String: Any]) -> DBMessage? {
         guard let data = try? JSONSerialization.data(withJSONObject: record) else { return nil }
         return try? JSONDecoder().decode(DBMessage.self, from: data)
+    }
+
+    // MARK: - Realtime (Live comments & invites)
+    private var liveCommentChannels: [String: RealtimeChannelV2] = [:] // key: streamId
+    private var inviteChannels: [String: RealtimeChannelV2] = [:] // key: streamId (viewer or host context)
+    private var giftChannels: [String: RealtimeChannelV2] = [:]
+
+    /// Subscribe to realtime inserts on live_stream_comments for a specific stream id.
+    func subscribeToLiveComments(streamId: String, onInsert: @escaping (DBLiveStreamComment) -> Void) async {
+        if liveCommentChannels[streamId] != nil { return }
+        let ch = client.channel("live-comments-\(streamId.prefix(6))")
+        _ = ch.onPostgresChange(InsertAction.self, schema: "public", table: "live_stream_comments", filter: "live_stream_id=eq.\(streamId)") { action in
+            let rec = action.record
+            guard let data = try? JSONSerialization.data(withJSONObject: rec), let row = try? JSONDecoder().decode(DBLiveStreamComment.self, from: data) else { return }
+            DispatchQueue.main.async { onInsert(row) }
+        }
+        do { try await ch.subscribeWithError() } catch { return }
+        liveCommentChannels[streamId] = ch
+    }
+
+    func unsubscribeLiveComments(streamId: String) async {
+        if let ch = liveCommentChannels.removeValue(forKey: streamId) {
+            await ch.unsubscribe(); await client.removeChannel(ch)
+        }
+    }
+
+    /// Subscribe to realtime updates on invites for the current viewer for this stream (status changes).
+    func subscribeToMyInvite(streamId: String, onStatus: @escaping (String) -> Void) async {
+        guard let me = user?.id.uuidString else { return }
+        if inviteChannels["viewer_\(streamId)"] != nil { return }
+        let ch = client.channel("live-invite-self-\(streamId.prefix(6))")
+        _ = ch.onPostgresChange(UpdateAction.self, schema: "public", table: "live_stream_invites", filter: "live_stream_id=eq.\(streamId)") { action in
+            let rec = action.record
+            // Decode robustly to avoid AnyJSON casts
+            if let data = try? JSONSerialization.data(withJSONObject: rec) {
+                struct InviteRow: Decodable { let invitee_id: String; let status: String }
+                if let row = try? JSONDecoder().decode(InviteRow.self, from: data), row.invitee_id == me {
+                    DispatchQueue.main.async { onStatus(row.status) }
+                }
+            }
+        }
+        do { try await ch.subscribeWithError() } catch { return }
+        inviteChannels["viewer_\(streamId)"] = ch
+    }
+
+    func unsubscribeMyInvite(streamId: String) async {
+        if let ch = inviteChannels.removeValue(forKey: "viewer_\(streamId)") { await ch.unsubscribe(); await client.removeChannel(ch) }
+    }
+
+    /// Host: Subscribe to any changes on invites for a live to refresh list.
+    func subscribeToInvitesForLive(streamId: String, onChange: @escaping () -> Void) async {
+        if inviteChannels["host_\(streamId)"] != nil { return }
+        let ch = client.channel("live-invite-host-\(streamId.prefix(6))")
+        _ = ch.onPostgresChange(InsertAction.self, schema: "public", table: "live_stream_invites", filter: "live_stream_id=eq.\(streamId)") { _ in DispatchQueue.main.async { onChange() } }
+        _ = ch.onPostgresChange(UpdateAction.self, schema: "public", table: "live_stream_invites", filter: "live_stream_id=eq.\(streamId)") { _ in DispatchQueue.main.async { onChange() } }
+        do { try await ch.subscribeWithError() } catch { return }
+        inviteChannels["host_\(streamId)"] = ch
+    }
+
+    func unsubscribeInvitesForLive(streamId: String) async {
+        if let ch = inviteChannels.removeValue(forKey: "host_\(streamId)") { await ch.unsubscribe(); await client.removeChannel(ch) }
+    }
+
+    // Gift events Realtime: subscribe to inserts on gift_sent for a live
+    struct RTGiftSentRow: Decodable { let live_stream_id: String; let gifter: String; let recipient: String; let gift: String; let tokens_used: Int?; let created_at: String? }
+    func subscribeToGiftSent(streamId: String, onInsert: @escaping (RTGiftSentRow) -> Void) async {
+        if giftChannels[streamId] != nil { return }
+        let ch = client.channel("gift-sent-\(streamId.prefix(6))")
+        _ = ch.onPostgresChange(InsertAction.self, schema: "public", table: "gift_sent", filter: "live_stream_id=eq.\(streamId)") { action in
+            let rec = action.record
+            guard let data = try? JSONSerialization.data(withJSONObject: rec), let row = try? JSONDecoder().decode(RTGiftSentRow.self, from: data) else { return }
+            DispatchQueue.main.async { onInsert(row) }
+        }
+        do { try await ch.subscribeWithError() } catch { return }
+        giftChannels[streamId] = ch
+    }
+    func unsubscribeGiftSent(streamId: String) async {
+        if let ch = giftChannels.removeValue(forKey: streamId) { await ch.unsubscribe(); await client.removeChannel(ch) }
     }
 
     struct PresignRequest: Encodable {

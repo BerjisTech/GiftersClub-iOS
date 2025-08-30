@@ -11,9 +11,12 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
     @Published var cameraOn: Bool = false
     @Published var micOn: Bool = false
     @Published var localVideoTrack: VideoTrack?
+    @Published var remoteVideoTracks: [LiveKit.VideoTrack] = []
+    @Published var remoteVideos: [LKRemoteVideo] = []
     @Published var isFront: Bool = true
 
     let room = Room()
+    private var trackPollTimer: Timer? = nil
 
     override init() {
         super.init()
@@ -28,6 +31,7 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
         self.micOn = true
         self.cameraOn = true
         self.localVideoTrack = self.room.localParticipant.videoTracks.first?.track as? LiveKit.VideoTrack
+        startTrackPolling()
     }
 
     func toggleMic() async {
@@ -62,9 +66,36 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
         self.localVideoTrack = nil
         self.micOn = false
         self.cameraOn = false
+        self.remoteVideoTracks = []
+        self.remoteVideos = []
+        trackPollTimer?.invalidate(); trackPollTimer = nil
     }
 
     // RoomDelegate methods are optional; we rely on direct state after publish/toggles.
+
+    private func startTrackPolling() {
+        trackPollTimer?.invalidate()
+        trackPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                var tracks: [LiveKit.VideoTrack] = []
+                var videos: [LKRemoteVideo] = []
+                for p in self.room.remoteParticipants.values {
+                    for pub in p.videoTracks {
+                        if let t = pub.track as? LiveKit.VideoTrack {
+                            tracks.append(t)
+                            let rid = (pub.track?.sid ?? UUID().uuidString) + (p.identity ?? "")
+                            videos.append(LKRemoteVideo(id: rid, track: t, identity: p.identity))
+                        }
+                    }
+                }
+                if tracks.map({ ObjectIdentifier($0) }) != self.remoteVideoTracks.map({ ObjectIdentifier($0) }) {
+                    self.remoteVideoTracks = tracks
+                }
+                self.remoteVideos = videos
+            }
+        }
+    }
 }
 
 struct LKVideoView: UIViewRepresentable {

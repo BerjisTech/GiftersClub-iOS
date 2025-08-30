@@ -14,6 +14,17 @@ struct GoLiveSetupView: View {
     @State private var stream: SupabaseManager.DBLiveStream? = nil
     @State private var showBroadcast: Bool = false
     @State private var errorText: String? = nil
+    // Access & scheduling
+    enum AccessType: String, CaseIterable { case free, subscription, paid }
+    @State private var accessType: AccessType = .free
+    @State private var priceText: String = ""
+    @State private var availablePlans: [SupabaseManager.DBSubscriptionPlan] = []
+    @State private var selectedPlanId: String? = nil
+    enum Timing: String, CaseIterable { case now, schedule }
+    @State private var timing: Timing = .now
+    @State private var scheduledAt: Date = Calendar.current.date(byAdding: .hour, value: 2, to: Date()) ?? Date()
+    // Match
+    @State private var startAsMatch: Bool = false
 
     @StateObject private var supa = SupabaseManager.shared
 
@@ -47,7 +58,7 @@ struct GoLiveSetupView: View {
                                 .buttonStyle(.plain)
                                 .padding(.vertical, 6)
                             }
-                        } }.frame(maxHeight: 120)
+                        } }.frame(maxHeight: 260)
                         if let sc = selectedCategory { Text("Selected: \(sc.name)").font(.caption).foregroundStyle(.secondary) }
                     }
                     VStack(alignment: .leading, spacing: 8) {
@@ -55,14 +66,50 @@ struct GoLiveSetupView: View {
                         TextField("Comma separated, e.g. gaming, music", text: $tagsText)
                             .textFieldStyle(.roundedBorder)
                     }
+                    // Access configuration
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Access").font(.subheadline.bold())
+                        Picker("Access", selection: $accessType) {
+                            Text("Free").tag(AccessType.free)
+                            Text("Subscription").tag(AccessType.subscription)
+                            Text("One-time").tag(AccessType.paid)
+                        }
+                        .pickerStyle(.segmented)
+                        if accessType == .paid {
+                            TextField("Price (tokens)", text: $priceText)
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                        } else if accessType == .subscription {
+                            Picker("Plan (optional)", selection: Binding(get: { selectedPlanId ?? availablePlans.first?.id }, set: { selectedPlanId = $0 })) {
+                                Text("Any Plan").tag(nil as String?)
+                                ForEach(availablePlans, id: \.id) { p in
+                                    Text("\(p.name) — \(p.tokens)").tag(p.id as String?)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                    }
+                    // Timing
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("When").font(.subheadline.bold())
+                        Picker("When", selection: $timing) {
+                            Text("Go Live Now").tag(Timing.now)
+                            Text("Schedule").tag(Timing.schedule)
+                        }
+                        .pickerStyle(.segmented)
+                        if timing == .schedule {
+                            DatePicker("Start time", selection: $scheduledAt, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                                .datePickerStyle(.graphical)
+                        }
+                    }
+                    // Match toggle
+                    Toggle("This is a Match (battle)", isOn: $startAsMatch)
                 }
                 .padding(.top, 8)
 
                 Spacer()
 
-                GradientButton(title: "Start Live", state: btnState) {
-                    Task { await startLive() }
-                }
+                GradientButton(title: timing == .now ? "Start Live" : "Schedule", state: btnState) { Task { await startLive() } }
             }
             .padding()
             .toolbar {
@@ -79,6 +126,10 @@ struct GoLiveSetupView: View {
         }
         .task {
             if categories.isEmpty { if let rows = try? await supa.fetchSystemCategories() { categories = rows } }
+            if accessType == .subscription, let me = supa.user?.id.uuidString, let plans = try? await supa.fetchSubscriptionPlans(creatorId: me) {
+                availablePlans = plans.sorted { $0.tokens < $1.tokens }
+                selectedPlanId = availablePlans.first?.id
+            }
         }
     }
 
@@ -92,11 +143,47 @@ struct GoLiveSetupView: View {
         await MainActor.run { btnState = .loading }
         do {
             let tags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            let created = try await supa.createLiveSession(title: title, description: description.isEmpty ? nil : description, categoryId: selectedCategory?.id, tags: tags)
-            await MainActor.run {
-                self.stream = created
-                self.btnState = .success
-                self.showBroadcast = true
+            if timing == .now {
+                let created = try await supa.createLiveSession(title: title, description: description.isEmpty ? nil : description, categoryId: selectedCategory?.id, tags: tags)
+                // Apply access settings if needed
+                switch accessType {
+                case .free:
+                    break
+                case .paid:
+                    if let price = Int(priceText), price > 0 {
+                        _ = try? await supa.updateLiveSession(id: created.id, updates: ["access_type": "paid", "price": price])
+                    }
+                case .subscription:
+                    var updates: [String: Any] = ["access_type": "subscription"]
+                    if let pid = selectedPlanId { updates["required_plan_id"] = pid }
+                    _ = try? await supa.updateLiveSession(id: created.id, updates: updates)
+                }
+                // Optionally start a battle immediately
+                if startAsMatch { _ = try? await supa.createBattle(streamId: created.id) }
+                await MainActor.run {
+                    self.stream = created
+                    self.btnState = .success
+                    self.showBroadcast = true
+                }
+            } else {
+                // Schedule live
+                let iso = ISO8601DateFormatter().string(from: scheduledAt)
+                let _ = try await supa.createScheduledLiveStream(
+                    title: title,
+                    description: description.isEmpty ? nil : description,
+                    categoryId: selectedCategory?.id,
+                    tags: tags,
+                    scheduledAtISO: iso,
+                    accessType: accessType.rawValue,
+                    price: accessType == .paid ? (Int(priceText) ?? nil) : nil,
+                    requiredPlanId: accessType == .subscription ? selectedPlanId : nil
+                )
+                await MainActor.run {
+                    self.btnState = .success
+                    self.errorText = "Scheduled successfully for \(scheduledAt.formatted(date: .abbreviated, time: .shortened))"
+                }
+                // Auto close after a short delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { dismiss() }
             }
         } catch {
             await MainActor.run {

@@ -20,7 +20,7 @@ struct PaywallSheet: View {
             VStack(spacing: 16) {
                 Image(systemName: "lock.fill").font(.largeTitle)
                 switch mode {
-                case .subscription(let creatorId):
+                case .subscription:
                     Text("Subscribe to @\(creatorUsername ?? "creator")").font(.headline)
                     if plans.isEmpty {
                         Text("This creator has no subscription plans available.")

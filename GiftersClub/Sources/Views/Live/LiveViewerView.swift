@@ -21,11 +21,45 @@ struct LiveViewerView: View {
     @State private var giftsTimer: Timer? = nil
     @State private var lastGiftAt: String? = nil
     @State private var giftCombos: [String: (count: Int, index: Int)] = [:]
+    @State private var cohostStreamIds: [String] = []
+    @State private var cohostCommentsTimer: Timer? = nil // legacy fallback; kept for safety
+    @State private var commentSubscribedIds: Set<String> = []
+    // Matches (battles)
+    @State private var battleActive: Bool = false
+    @State private var battleId: String? = nil
+    @State private var battleStartedAt: String? = nil
+    @State private var battleTallies: [String: Int] = [:] // recipient user_id -> tokens
+    @State private var battleParticipants: [SupabaseManager.DBBattleParticipant] = []
+    @State private var battleTimer: Timer? = nil
+    @State private var battleEndsAt: String? = nil
+    @State private var battleCountdownTimer: Timer? = nil
+    @State private var battleCountdownText: String = ""
+    // Guest invite
+    @State private var canRequestGuest: Bool = false
+    @State private var hasRequestedGuest: Bool = false
+    @State private var invitePollTimer: Timer? = nil
+    @State private var showGiftsSheet: Bool = false
+    @State private var showGiftAnimation: Bool = false
+    @State private var giftAnimationText: String = ""
+    @State private var giftAnimationLottie: String? = nil
+    @State private var giftCache: [String: SupabaseManager.DBGift] = [:]
 
     var body: some View {
         ZStack {
             if ended {
                 endedView
+            } else if !viewer.remoteVideoTracks.isEmpty {
+                ZStack {
+                    videoGrid
+                    if battleActive {
+                        HStack(spacing: 0) {
+                            Color.yellow.opacity(0.08)
+                            Color.blue.opacity(0.08)
+                        }
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                    }
+                }
             } else if let track = viewer.remoteVideoTrack {
                 LKVideoView(track: track)
                     .scaleEffect(x: -1, y: 1) // mirror horizontally to match Angular (-scale-x-100)
@@ -43,19 +77,33 @@ struct LiveViewerView: View {
             }
 
             if !ended {
-                VStack {
+                VStack(spacing: 6) {
                     topBar
+                    if battleActive { matchBar }
                     Spacer()
                     bottomBar
                 }
                 .padding()
                 .zIndex(2)
-                // Placeholder overlay for special gift animations (to be implemented)
+                // Gift animation overlay
                 .overlay(alignment: .center) {
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .allowsHitTesting(false)
-                        .accessibilityIdentifier("GiftAnimationOverlay")
+                    Group {
+                        if showGiftAnimation {
+                            if let anim = giftAnimationLottie {
+                                LottieView(name: anim, loopMode: .playOnce) { showGiftAnimation = false }
+                                    .frame(width: 220, height: 220)
+                            } else {
+                                Text(giftAnimationText)
+                                    .font(.largeTitle.bold())
+                                    .foregroundStyle(.white)
+                                    .padding(12)
+                                    .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+                                    .transition(.scale.combined(with: .opacity))
+                            }
+                        } else { Color.clear }
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("GiftAnimationOverlay")
                 }
             }
         }
@@ -65,11 +113,66 @@ struct LiveViewerView: View {
             await join()
             await supa.recordViewerJoin(streamId: live.id)
             await loadComments(); await startStatusPolling()
+            // Cohost comments: switch to realtime across stream ids (fallback timer disabled by default)
+            if let ids = try? await supa.fetchCohostStreamIds(streamId: live.id) {
+                _ = await MainActor.run { cohostStreamIds = ids }
+                for id in ids where !commentSubscribedIds.contains(id) {
+                    await supa.subscribeToLiveComments(streamId: id) { c in
+                        if !comments.contains(where: { $0.id == c.id }) {
+                            comments.append(c)
+                        }
+                        // Preload profile
+                        Task { if profilesCache[c.user_id] == nil, let p = try? await supa.fetchProfileByUserId(c.user_id) { await MainActor.run { profilesCache[c.user_id] = p } } }
+                    }
+                    _ = await MainActor.run { commentSubscribedIds.insert(id) }
+                }
+                // Initial load of existing comments across cohost streams
+                if let list = try? await supa.fetchLiveCommentsMulti(streamIds: ids) {
+                    await MainActor.run { comments = list }
+                    for c in list {
+                        if profilesCache[c.user_id] == nil, let p = try? await supa.fetchProfileByUserId(c.user_id) {
+                            await MainActor.run { profilesCache[c.user_id] = p }
+                        }
+                    }
+                }
+            }
             if let row = try? await supa.fetchLiveStreamById(live.id) {
-                await MainActor.run { viewerCount = row.viewer_count ?? 0 }
+                _ = await MainActor.run { viewerCount = row.viewer_count ?? 0 }
             }
             if hostProfile == nil, let p = try? await supa.fetchProfileByUserId(live.host_id) {
                 await MainActor.run { hostProfile = p }
+            }
+            // Guest request availability (non-host and not in battle)
+            await MainActor.run { canRequestGuest = (supa.user?.id.uuidString != live.host_id) }
+            // Load battle state (if any) and start tally polling
+            var activeBattle: SupabaseManager.DBBattleSession? = nil
+            do { activeBattle = try await supa.fetchActiveBattleForStream(streamId: live.id) } catch { activeBattle = nil }
+            if let battle = activeBattle {
+                await MainActor.run {
+                    battleActive = true
+                    battleId = battle.id
+                    battleStartedAt = battle.started_at
+                    battleEndsAt = battle.ends_at
+                    battleCountdownText = computeCountdown()
+                }
+                if let parts = try? await supa.fetchBattleParticipants(battleId: battle.id) {
+                    await MainActor.run { battleParticipants = parts }
+                }
+                battleTimer?.invalidate()
+                battleTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true, block: { _ in
+                    Task {
+                        let startedAt = await MainActor.run { battleStartedAt }
+                        let ids = await MainActor.run { battleParticipants.map { $0.user_id } }
+                        guard let s = startedAt, !ids.isEmpty else { return }
+                        if let t = try? await supa.fetchBattleTalliesSince(startedAtIso: s, userIds: ids) {
+                            await MainActor.run { battleTallies = t }
+                        }
+                    }
+                })
+                battleCountdownTimer?.invalidate()
+                battleCountdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true, block: { _ in
+                    Task { await MainActor.run { battleCountdownText = computeCountdown() } }
+                })
             }
             // Preload follow state for viewer
             if let me = supa.user?.id.uuidString, me != live.host_id {
@@ -83,44 +186,247 @@ struct LiveViewerView: View {
                     await MainActor.run { isFollowing = !(res.value.isEmpty) }
                 }
             }
-            // Gifts polling: append combo notifications into comments
-            giftsTimer?.invalidate();
-            giftsTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true, block: { _ in
+            // Gifts realtime: append combo notifications into comments
+            await supa.subscribeToGiftSent(streamId: live.id) { row in
                 Task {
-                    let since = await MainActor.run { lastGiftAt }
-                    let events = try? await supa.fetchGiftEvents(streamId: live.id, since: since)
-                    guard let evs = events, !evs.isEmpty else { return }
+                    // Resolve gifter username
+                    let uname = await MainActor.run { profilesCache[row.gifter]?.username } ?? String(row.gifter.prefix(6))
+                    // Resolve gift name from cache or DB
+                    var gname = "gift"
+                    if let cached = await MainActor.run(body: { giftCache[row.gift] }) {
+                        gname = (cached.name ?? "gift").lowercased()
+                    } else if let g = try? await supa.fetchGiftById(row.gift) {
+                        await MainActor.run { giftCache[row.gift] = g }
+                        gname = (g.name ?? "gift").lowercased()
+                    }
                     await MainActor.run {
-                        lastGiftAt = evs.last?.created_at
                         var newItems: [SupabaseManager.DBLiveStreamComment] = []
-                        for e in evs {
-                            let uname = e.gifter_row?.username ?? String(e.gifter.prefix(6))
-                            let gname = e.gift_row?.name ?? "gift"
-                            let key = e.gifter + "_" + e.gift
-                            if var combo = giftCombos[key] {
-                                combo.count += 1
-                                giftCombos[key] = combo
-                                let idx = combo.index
-                                if idx < comments.count {
-                                    comments[idx] = SupabaseManager.DBLiveStreamComment(id: comments[idx].id, live_stream_id: comments[idx].live_stream_id, user_id: comments[idx].user_id, content: "\(uname) sent a \(combo.count)x \(gname) combo", created_at: comments[idx].created_at)
-                                }
-                            } else {
-                                let c = SupabaseManager.DBLiveStreamComment(id: "gift-\(UUID().uuidString)", live_stream_id: live.id, user_id: e.gifter, content: "\(uname) sent a \(gname)", created_at: e.created_at)
-                                newItems.append(c)
-                                giftCombos[key] = (count: 1, index: comments.count + newItems.count - 1)
+                        let key = row.gifter + "_" + row.gift
+                        if var combo = giftCombos[key] {
+                            combo.count += 1
+                            giftCombos[key] = combo
+                            let idx = combo.index
+                            if idx < comments.count {
+                                comments[idx] = SupabaseManager.DBLiveStreamComment(id: comments[idx].id, live_stream_id: comments[idx].live_stream_id, user_id: comments[idx].user_id, content: "\(uname) sent a \(combo.count)x \(gname) combo", created_at: comments[idx].created_at)
                             }
+                            giftAnimationText = "\(uname) x\(combo.count) \(gname)!"
+                            giftAnimationLottie = lottieForGiftName(gname)
+                        } else {
+                            let c = SupabaseManager.DBLiveStreamComment(id: "gift-\(UUID().uuidString)", live_stream_id: live.id, user_id: row.gifter, content: "\(uname) sent a \(gname)", created_at: row.created_at)
+                            newItems.append(c)
+                            giftCombos[key] = (count: 1, index: comments.count + newItems.count - 1)
+                            giftAnimationText = "\(uname) sent \(gname)!"
+                            giftAnimationLottie = lottieForGiftName(gname)
                         }
                         comments.append(contentsOf: newItems)
+                        withAnimation(.spring()) { showGiftAnimation = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+                            withAnimation(.easeOut) { showGiftAnimation = false; giftAnimationLottie = nil }
+                        }
                     }
                 }
-            })
+            }
+            // Invite status via realtime
+            await supa.subscribeToMyInvite(streamId: live.id) { status in
+                if status == "accepted" {
+                    Task {
+                        do {
+                            let token = try await supa.fetchLiveGuestToken(streamId: live.id)
+                            try await viewer.upgradeToGuest(url: SupabaseConfig.livekitURL, token: token)
+                            await MainActor.run { hasRequestedGuest = false; canRequestGuest = false }
+                        } catch {
+                            await MainActor.run { errorText = (error as NSError).localizedDescription }
+                        }
+                    }
+                }
+            }
         }
         .alert("Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorText ?? "") }
         .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil) }
-        .onDisappear { NotificationCenter.default.post(name: .showBottomBar, object: nil); commentsTimer?.invalidate(); commentsTimer = nil; statusTimer?.invalidate(); statusTimer = nil; giftsTimer?.invalidate(); giftsTimer = nil; Task { await supa.recordViewerLeave(streamId: live.id) } }
+        .onDisappear {
+            NotificationCenter.default.post(name: .showBottomBar, object: nil)
+            commentsTimer?.invalidate(); commentsTimer = nil
+            cohostCommentsTimer?.invalidate(); cohostCommentsTimer = nil
+            statusTimer?.invalidate(); statusTimer = nil
+            giftsTimer?.invalidate(); giftsTimer = nil
+            battleTimer?.invalidate(); battleTimer = nil
+            battleCountdownTimer?.invalidate(); battleCountdownTimer = nil
+            invitePollTimer?.invalidate(); invitePollTimer = nil
+            Task {
+                for id in commentSubscribedIds { await supa.unsubscribeLiveComments(streamId: id) }
+                await supa.unsubscribeMyInvite(streamId: live.id)
+                await supa.recordViewerLeave(streamId: live.id)
+            }
+        }
         .onChange(of: ended) { _, isEnded in if isEnded { NotificationCenter.default.post(name: .showBottomBar, object: nil) } }
+    }
+
+    private var matchBar: some View {
+        let team1 = battleParticipants.filter { ($0.team ?? 1) == 1 }.map { $0.user_id }
+        let team2 = battleParticipants.filter { ($0.team ?? 2) == 2 }.map { $0.user_id }
+        let s1 = team1.reduce(0) { $0 + (battleTallies[$1] ?? 0) }
+        let s2 = team2.reduce(0) { $0 + (battleTallies[$1] ?? 0) }
+        let total = max(s1 + s2, 1)
+        let c1 = Color(red: 0.94, green: 0.27, blue: 0.27) // #ef4444
+        let c2 = Color(red: 0.23, green: 0.51, blue: 0.96) // #3b82f6
+        return VStack(spacing: 6) {
+            ZStack {
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        c1.frame(width: geo.size.width * CGFloat(Double(s1) / Double(total)))
+                        c2.frame(width: geo.size.width * CGFloat(Double(s2) / Double(total)))
+                    }
+                }
+                .frame(height: 12)
+                .clipShape(Capsule())
+                HStack {
+                    Text("\(s1)").font(.caption.bold()).foregroundStyle(.white)
+                    Spacer()
+                    Text("\(s2)").font(.caption.bold()).foregroundStyle(.white)
+                }
+                .padding(.horizontal, 8)
+            }
+            .background(Color.black.opacity(0.25))
+            .clipShape(Capsule())
+            // Time progress (below scores)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.25)).frame(height: 6)
+                Capsule().fill(Color.white).frame(height: 6)
+                    .scaleEffect(x: CGFloat(timeProgress()), y: 1.0, anchor: .leading)
+            }
+            .overlay(alignment: .trailing) { Text(battleCountdownText).font(.caption2.bold()).foregroundStyle(.white.opacity(0.9)) }
+            // Avatars/labels per team
+            HStack(spacing: 12) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(team1, id: \.self) { uid in
+                            Text(shortUsername(for: uid))
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(c1.opacity(0.5))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(team2, id: \.self) { uid in
+                            Text(shortUsername(for: uid))
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(c2.opacity(0.5))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func shortUsername(for userId: String) -> String {
+        if let p = profilesCache[userId] { return p.username.isEmpty ? (p.name ?? String(userId.prefix(6))) : p.username }
+        Task { if let p = try? await supa.fetchProfileByUserId(userId) { await MainActor.run { profilesCache[userId] = p } } }
+        return String(userId.prefix(6))
+    }
+    private func requestToJoin() async {
+        let ok = await supa.requestGuestInvite(streamId: live.id)
+        await MainActor.run { hasRequestedGuest = ok }
+    }
+
+    private func lottieForGiftName(_ name: String) -> String? {
+        let map: [String: String] = [
+            "rose": "rose",
+            "heart": "heart",
+            "diamond": "diamond",
+            "star": "star",
+            "rocket": "rocket",
+            "cake": "cake",
+            "coffee": "coffee",
+            "crown": "crown",
+            "kiss": "kiss",
+            "fire": "fire",
+            "balloon": "balloon",
+            "flower": "flower",
+            "teddy": "teddy",
+            "car": "car",
+            "yacht": "yacht",
+            "castle": "castle"
+        ]
+        return map[name]
+    }
+
+    private func isoToDate(_ s: String?) -> Date? {
+        guard let s else { return nil }
+        return ISO8601DateFormatter().date(from: s)
+    }
+    private func computeCountdown() -> String {
+        guard let end = isoToDate(battleEndsAt) else { return "" }
+        let now = Date()
+        let remain = max(0, end.timeIntervalSince1970 - now.timeIntervalSince1970)
+        let m = Int(remain) / 60
+        let sec = Int(remain) % 60
+        return String(format: "%d:%02d", m, sec)
+    }
+    private func timeProgress() -> Double {
+        guard let start = isoToDate(battleStartedAt), let end = isoToDate(battleEndsAt) else { return 0 }
+        let now = Date()
+        let total = max(end.timeIntervalSince1970 - start.timeIntervalSince1970, 1)
+        let elapsed = min(max(0, now.timeIntervalSince1970 - start.timeIntervalSince1970), total)
+        return Double(elapsed) / Double(total)
+    }
+
+    private var videoGrid: some View {
+        struct Tile: Identifiable { let id: String; let track: LiveKit.VideoTrack; let userId: String? }
+        var tiles: [Tile] = []
+        if let local = viewer.localVideoTrack { tiles.append(Tile(id: "local", track: local, userId: supa.user?.id.uuidString)) }
+        for rv in viewer.remoteVideos { tiles.append(Tile(id: rv.id, track: rv.track, userId: rv.identity)) }
+        return Group {
+            if tiles.count == 1 {
+                LKVideoView(track: tiles.first!.track)
+                    .scaleEffect(x: -1, y: 1)
+                    .ignoresSafeArea()
+            } else {
+                let cols: [GridItem] = Array(repeating: GridItem(.flexible(), spacing: 8), count: tiles.count <= 2 ? 1 : (tiles.count <= 4 ? 2 : 3))
+                ScrollView { // allow more than 6 tracks to scroll
+                    LazyVGrid(columns: cols, spacing: 8) {
+                        ForEach(tiles) { t in
+                            ZStack(alignment: .bottomLeading) {
+                                LKVideoView(track: t.track)
+                                    .scaleEffect(x: -1, y: 1)
+                                    .aspectRatio(3/4, contentMode: .fit)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.6), lineWidth: 1))
+                                    .overlay(teamOverlay(for: t.userId))
+                                Text(usernamePill(for: t.userId))
+                                    .font(.caption2.bold())
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                    .background(Color.black.opacity(0.4))
+                                    .clipShape(Capsule())
+                                    .padding(6)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+                .ignoresSafeArea()
+            }
+        }
+    }
+
+    private func teamOverlay(for userId: String?) -> some View {
+        guard battleActive, let uid = userId else { return AnyView(EmptyView()) }
+        let team = battleParticipants.first(where: { $0.user_id == uid })?.team
+        let c: Color? = team == 1 ? .yellow.opacity(0.12) : (team == 2 ? .blue.opacity(0.12) : nil)
+        if let cc = c { return AnyView(RoundedRectangle(cornerRadius: 8).fill(cc)) }
+        return AnyView(EmptyView())
+    }
+    private func usernamePill(for userId: String?) -> String {
+        guard let uid = userId else { return "" }
+        if let cached = profilesCache[uid] { return cached.username.isEmpty ? (cached.name ?? String(uid.prefix(6))) : cached.username }
+        Task { if let p = try? await supa.fetchProfileByUserId(uid) { await MainActor.run { profilesCache[uid] = p } } }
+        return String(uid.prefix(6))
     }
 
     private var topBar: some View {
@@ -169,6 +475,7 @@ struct LiveViewerView: View {
             .background(Color.black.opacity(0.35))
             .clipShape(Capsule())
 
+            // Removed request button from top bar to avoid squeezing username
             Button { Task { await viewer.disconnect(); await MainActor.run { dismiss() } } } label: {
                 Text("Close")
                     .font(.subheadline.bold())
@@ -227,14 +534,22 @@ struct LiveViewerView: View {
                     Text("Send")
                 }
                 .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                if let uname = hostProfile?.username {
-                    Button(action: { NotificationCenter.default.post(name: .showGifterProfile, object: uname) }) {
-                        Image(systemName: "gift.fill")
+                Button(action: { showGiftsSheet = true }) {
+                    Image(systemName: "gift.fill")
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 44, minHeight: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.bordered)
+                if canRequestGuest && !hasRequestedGuest && !battleActive {
+                    Button(action: { Task { await requestToJoin() } }) {
+                        Image(systemName: "person.2.fill")
                             .foregroundStyle(.white)
                             .frame(minWidth: 44, minHeight: 36)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.bordered)
+                    .accessibilityLabel("Request to join")
                 }
             }
             .contentShape(Rectangle())
@@ -243,6 +558,7 @@ struct LiveViewerView: View {
         .background(Color.black.opacity(0.25))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .zIndex(3)
+        .sheet(isPresented: $showGiftsSheet) { GiftPickerSheet(recipientId: live.host_id) }
     }
 
     private func username(for userId: String) -> String {
@@ -372,10 +688,7 @@ struct LiveViewerView: View {
                     if row.status != "live" {
                     // Disconnect first, then update UI
                     await viewer.disconnect()
-                    await MainActor.run {
-                        ended = true
-                        NotificationCenter.default.post(name: .showBottomBar, object: nil)
-                    }
+                    await MainActor.run { ended = true }
                         let isEmpty = await MainActor.run { suggestions.isEmpty }
                         if isEmpty {
                         if let lives = try? await supa.fetchFeedLiveStreams(limit: 4, query: nil) {
@@ -384,8 +697,7 @@ struct LiveViewerView: View {
                     }
                     } else {
                         await MainActor.run { viewerCount = row.viewer_count ?? 0 }
-                        // Reinforce hiding bottom chrome while viewing
-                        NotificationCenter.default.post(name: .hideBottomBar, object: nil)
+                        // Keep bottom chrome hidden via onAppear; avoid spamming notifications here
                     }
                 }
             }

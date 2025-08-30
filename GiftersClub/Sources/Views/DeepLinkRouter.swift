@@ -3,6 +3,7 @@ import Foundation
 enum DeepLink: Equatable {
     case wishlist(id: String)
     case gifter(username: String)
+    case live(id: String, manage: Bool, setupMatch: Bool)
 }
 
 enum DeepLinkRouter {
@@ -16,10 +17,19 @@ enum DeepLinkRouter {
             if parts.count > 1 { return .wishlist(id: parts[1]) }
         case "u", "g":
             if parts.count > 1 { return .gifter(username: parts[1]) }
+        case "live":
+            if parts.count > 1 {
+                var manage = false
+                var setup = false
+                if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
+                    manage = items.first(where: { $0.name == "manage" })?.value == "1"
+                    setup = items.first(where: { $0.name == "setupMatch" })?.value == "1"
+                }
+                return .live(id: parts[1], manage: manage, setupMatch: setup)
+            }
         default:
             break
         }
         return nil
     }
 }
-
