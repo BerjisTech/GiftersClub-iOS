@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(LiveKit)
+import LiveKit
+#endif
 import Supabase
 
 struct LiveViewerView: View {
@@ -415,7 +418,7 @@ struct LiveViewerView: View {
         }
     }
 
-    private func teamOverlay(for userId: String?) -> some View {
+    private func teamOverlay(for userId: String?) -> AnyView {
         guard battleActive, let uid = userId else { return AnyView(EmptyView()) }
         let team = battleParticipants.first(where: { $0.user_id == uid })?.team
         let c: Color? = team == 1 ? .yellow.opacity(0.12) : (team == 2 ? .blue.opacity(0.12) : nil)
