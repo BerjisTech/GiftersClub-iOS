@@ -1,0 +1,16 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": [
+          "YOUR_TEAM_ID.club.gifters.giftersclub"
+        ],
+        "components": [
+          { "/": "/*", "comment": "All links map to the app" }
+        ]
+      }
+    ]
+  }
+}
+

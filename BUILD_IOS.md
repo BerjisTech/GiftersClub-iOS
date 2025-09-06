@@ -41,6 +41,70 @@ Notes:
 - Associated Domains: optional. Add if you plan universal links (`applinks:your.domain`). Not required for `ASWebAuthenticationSession` callback with URL scheme.
 - Keychain Sharing/App Groups: not required.
 
+### Must‑have vs Recommended (with rationale)
+
+- Must‑have (enable first):
+  - In‑App Purchase: required to sell tokens via StoreKit.
+  - Push Notifications: for live/DM/purchase alerts (enable now even if you wire later).
+  - Associated Domains: for universal links to `https://gifters.club/...` (solid UX; required for magic sign‑in links).
+  - Info.plist usage descriptions: camera, microphone, photo library (prompts required by App Review).
+- Strongly recommended (nice‑to‑have):
+  - Background Modes → Remote notifications: allows efficient push handling.
+  - Background Modes → Audio, AirPlay, and Picture in Picture: enables playback/PiP when app not foreground.
+  - Sign in with Apple: add if you offer any third‑party sign‑in (Apple guideline).
+  - Associated Domains for `www.gifters.club` too if you use both apex and www.
+
+### Copy‑paste snippets
+
+Info.plist keys:
+
+```xml
+<!-- Camera & mic prompts -->
+<key>NSCameraUsageDescription</key>
+<string>We use your camera so you can go live and record videos on Gifters Club.</string>
+<key>NSMicrophoneUsageDescription</key>
+<string>We use your microphone for live audio and video posts.</string>
+
+<!-- Photo library if users upload from gallery -->
+<key>NSPhotoLibraryUsageDescription</key>
+<string>Allow access to upload videos and images from your library.</string>
+
+<!-- Optional: for saving to library -->
+<key>NSPhotoLibraryAddUsageDescription</key>
+<string>Allow saving your recorded videos to your library.</string>
+
+<!-- Background modes (playback + remote notifications) -->
+<key>UIBackgroundModes</key>
+<array>
+  <string>audio</string>
+  <string>remote-notification</string>
+  <!-- Add "picture-in-picture" only if you integrate system PiP APIs explicitly -->
+  <!-- <string>picture-in-picture</string> -->
+  <!-- Do NOT add "voip" unless using proper VoIP pushes + CallKit -->
+  <!-- <string>voip</string> -->
+  <!-- Do NOT add "audio" if you never play background audio; only enable modes you actually use. -->
+  <!-- Apple reviews expect modes to match behavior. -->
+  
+</array>
+```
+
+Associated Domains (Xcode → Signing & Capabilities → Associated Domains):
+
+```
+applinks:gifters.club
+applinks:www.gifters.club
+```
+
+Host this file on your site (HTTPS, no redirects):
+- Path: `https://gifters.club/.well-known/apple-app-site-association`
+- Use the sample committed at `GiftersClub-iOS/AssociatedDomains/apple-app-site-association` and replace `YOUR_TEAM_ID` with your Team ID (find in Apple Developer → Membership).
+
+Push Notifications (APNs) quick checklist:
+- App Store Connect → Keys → + → Apple Push Notifications Authentication Key (APNs) → download `.p8`.
+- Note Key ID and your Team ID; keep the `.p8` safe (store in your server secrets).
+- Backend (Supabase Edge Functions): configure env like `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_P8` to send server‑side pushes.
+- Xcode: add “Push Notifications” capability. In‑app: request permission with `UNUserNotificationCenter` and register for remote notifications.
+
 ## 2) Add the IAP product in ASC (gift_token)
 
 1. App Store Connect → My Apps → Your App → In‑App Purchases → +.
@@ -278,6 +342,11 @@ Tips:
 - Keep Info.plist permission strings specific: e.g., “Camera is used for livestreams and to capture photos/videos for your posts.”
 - Ensure the app shows the IAP UI and a flow to purchase for the reviewer with clear steps.
 
+App Services toggles (in ASC → App Information → App Services):
+- Turn ON: In‑App Purchases, Push Notifications.
+- Sign in with Apple: turn ON if you offer any third‑party sign‑in elsewhere.
+  
+
 ## 13) IAP Review Info and Common Statuses
 
 Where to add: ASC → Your App → In‑App Purchases → select `gift_token` → Review Information.
@@ -287,6 +356,24 @@ Include in Review Information:
 - Exact steps to reach the purchase UI (e.g., Profile → Top Up Tokens → Buy).
 - Note that purchases run in sandbox; provide a sandbox tester or say “use any Apple sandbox tester”.
 - Explain expected grant: “Purchasing `gift_token` credits 70 tokens to the user account.”
+
+Reviewer notes template (copy‑paste to ASC → Version → Review Notes):
+
+```
+Test account (internal):
+  Email: reviewer@gifters.club
+  Password: <provide>
+
+IAP test instructions:
+1) Launch the app and log in with the test account above.
+2) Open Profile → Buy Tokens.
+3) Select the $0.99 option (gift_token) and confirm purchase.
+4) Expected: 70 tokens are credited; balance updates and a success toast appears.
+
+Notes:
+- IAP uses Apple sandbox in TestFlight; a sandbox prompt may appear.
+- If needed, you can sign in with any Apple sandbox tester account.
+```
 
 Common IAP statuses (and fixes):
 - Missing Metadata: add Display Name, Description, Screenshot, Pricing, Localization; ensure Cleared for Sale = Yes.
