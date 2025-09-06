@@ -12,19 +12,16 @@ This doc captures the minimal, repeatable process to ship consumable token packs
 
 We sell tokens (coins) as consumable products; users spend tokens on gifts and wishlists. Gifts are NOT IAP items.
 
-- Suggested product IDs (can change later, but IDs are immutable once created):
-  - `tokens_70`
-  - `tokens_150`
-  - `tokens_375`
-  - `tokens_800`
-- Token counts are iOS‑specific and sized to cover Apple’s commission and withdrawal fees. Adjust server mapping as needed.
+- Current product ID: `gift_token` priced at $0.99.
+- Grant: 70 tokens per purchase (approx. 30% platform fee accounted).
+- If pricing or fee assumptions change, you can adjust the token grant here (client) and/or on the server mapping.
 
 ## Create IAP Products in App Store Connect
 
 1. ASC → My Apps → Your App → In‑App Purchases → + → New In‑App Purchase.
 2. Type: Consumable.
 3. Reference Name: Human label (e.g., "Tokens 70").
-4. Product ID: Must match the app (e.g., `tokens_70`).
+4. Product ID: Must match the app (e.g., `gift_token`).
 5. Pricing: Choose a Price Tier. You can customize per region later.
 6. Localizations: Add Display Name and Description for at least your primary locale.
 7. Cleared for Sale: Yes.
@@ -59,7 +56,7 @@ We sell tokens (coins) as consumable products; users spend tokens on gifts and w
 
 Update these when you finalize product IDs or token counts:
 
-- File: `GiftersClub-iOS/GiftersClub/Sources/Services/StoreKitService.swift` (packs and IDs)
+- File: `GiftersClub-iOS/GiftersClub/Sources/Services/StoreKitService.swift` (set `gift_token` and token grant)
 - (Optional) Move productId→tokens mapping to a Supabase config table for remote control.
 
 ## Server Validation Flow (Supabase Edge Function)
@@ -80,7 +77,7 @@ Server responsibilities:
 
 1. Verify the receipt/transaction with Apple (classic receipt validation or App Store Server API).
 2. Ensure the transaction is for `productId`, not refunded, and not already consumed.
-3. Map `productId` → tokens, credit the user, record the transaction, and return 2xx.
+3. Map `productId` → tokens (e.g., `gift_token` → 70), credit the user, record the transaction, and return 2xx.
 
 ## Economics (Pack Sizing)
 
@@ -105,7 +102,7 @@ Most apps either:
 ## Checklist
 
 - [ ] IAP capability enabled in Xcode target.
-- [ ] Consumable IAPs created in ASC with final product IDs.
+- [ ] Consumable IAPs created in ASC with final product IDs (e.g., `gift_token`).
 - [ ] StoreKit products load in the app (StoreKit config or sandbox tester).
 - [ ] Supabase function `purchase-tokens-iap` validates and credits tokens.
 - [ ] App refreshes balance and shows success toast after purchase.
@@ -114,4 +111,3 @@ Most apps either:
 ---
 
 If you change product IDs, update `StoreKitService.packs` and/or the server mapping. For economics help (token counts per tier), jot down fee %, withdrawal fee, and payout rate and we’ll compute a matching set of pack sizes.
-

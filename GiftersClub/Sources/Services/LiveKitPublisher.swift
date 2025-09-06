@@ -84,8 +84,12 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
                     for pub in p.videoTracks {
                         if let t = pub.track as? LiveKit.VideoTrack {
                             tracks.append(t)
-                            let rid = (pub.track?.sid ?? UUID().uuidString) + (p.identity ?? "")
-                            videos.append(LKRemoteVideo(id: rid, track: t, identity: p.identity))
+                            // Build a stable id by coercing types to String
+                            let sidStr = pub.track?.sid.map { String(describing: $0) } ?? UUID().uuidString
+                            let identityForId = (p.identity as? String) ?? String(describing: p.identity)
+                            let rid = sidStr + identityForId
+                            let identityValue: String? = p.identity as? String
+                            videos.append(LKRemoteVideo(id: rid, track: t, identity: identityValue))
                         }
                     }
                 }
