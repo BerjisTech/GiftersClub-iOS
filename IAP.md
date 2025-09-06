@@ -49,6 +49,18 @@ We sell tokens (coins) as consumable products; users spend tokens on gifts and w
 - ASC → Users and Access → Sandbox → Testers → + Create tester (email not tied to an Apple ID).
 - Run on device/simulator, initiate a purchase, sign in with the sandbox tester when prompted.
 
+### IAP Statuses in App Store Connect
+
+- Missing Metadata: One or more required fields are missing. Fix by adding Display Name, Description, Localization, Screenshot, and a Price Tier; set Cleared for Sale = Yes.
+- Ready to Submit: Metadata complete; the IAP will be reviewed with your next app version submission (link it in the App Version’s “In‑App Purchases” section).
+- Waiting for Review / In Review: Apple is reviewing the IAP.
+- Approved: IAP can go live with your app release.
+
+Review Information (what to include):
+- Test account credentials if your app requires login prior to purchase.
+- Step-by-step path to the purchase UI (e.g., Profile → Buy Tokens → select pack).
+- Clarify expected result (e.g., 70 tokens credited per `gift_token`).
+
 ## App Integration (Already Implemented)
 
 - `StoreKitService` loads products, performs purchases, and POSTs to a Supabase Edge Function for validation and crediting.
@@ -78,6 +90,10 @@ Server responsibilities:
 1. Verify the receipt/transaction with Apple (classic receipt validation or App Store Server API).
 2. Ensure the transaction is for `productId`, not refunded, and not already consumed.
 3. Map `productId` → tokens (e.g., `gift_token` → 70), credit the user, record the transaction, and return 2xx.
+
+Troubleshooting tips:
+- If the app reports purchase success but no tokens: check server logs for the `purchase-tokens-iap` function; verify Apple receipt validation and productId mapping.
+- If purchase sheet won’t appear in TestFlight: ensure you’re signed in with a sandbox tester when prompted; confirm IAP is “Cleared for Sale”.
 
 ## Economics (Pack Sizing)
 

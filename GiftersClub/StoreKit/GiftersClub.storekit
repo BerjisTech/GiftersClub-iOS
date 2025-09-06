@@ -1,0 +1,25 @@
+{
+  "identifier": "club.gifters.storekit",
+  "version": 1,
+  "products": [
+    {
+      "id": "gift_token",
+      "type": "consumable",
+      "displayName": "Gift Token",
+      "price": 0.99,
+      "familyShareable": false,
+      "localizations": [
+        {
+          "locale": "en_US",
+          "displayName": "Gift Token",
+          "description": "Buy 70 tokens"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "country": "US",
+    "subscriptionGroups": []
+  }
+}
+
