@@ -676,7 +676,7 @@ private func extractHashtags(_ text: String) -> [String] {
 }
     private func shareURL(for post: FeedPost) -> URL {
         // TODO: Build actual deep link for a post
-        return URL(string: "https://gifter.club/posts/\(post.id)")!
+        return URL(string: "https://gifters.club/posts/\(post.id)")!
     }
 
 // MARK: - Tab bar height introspection
