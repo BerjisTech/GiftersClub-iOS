@@ -153,7 +153,7 @@ private struct AutoPlayVideo: View {
     var body: some View {
         VideoPlayer(player: player)
             .onAppear { if player == nil { player = AVPlayer(url: url) }; if play { player?.play() } }
-            .onChange(of: play) { _, p in if p { player?.play() } else { player?.pause() } }
+            .onChange(of: play, perform: { p in if p { player?.play() } else { player?.pause() } })
             .onDisappear { player?.pause() }
             .ignoresSafeArea()
     }

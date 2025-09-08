@@ -73,7 +73,7 @@ struct GradientButton: View {
             // Animation handled via withAnimation on state change
         }
         .buttonStyle(.plain)
-        .onChange(of: state) { _, newValue in
+        .onChange(of: state, perform: { newValue in
             withAnimation(.easeInOut(duration: 0.35)) {
                 animatedColors = colors(for: newValue)
             }
@@ -82,7 +82,7 @@ struct GradientButton: View {
             } else if newValue == .error {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
             }
-        }
+        })
         .onAppear {
             animatedColors = colors(for: state)
         }

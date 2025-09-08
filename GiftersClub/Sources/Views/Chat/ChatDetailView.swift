@@ -38,9 +38,9 @@ struct ChatDetailView: View {
                         }
                     }
                 }
-                .onChange(of: messages.last?.id) { _, last in
+                .onChange(of: messages.last?.id, perform: { last in
                     if let last { withAnimation { proxy.scrollTo(last, anchor: .bottom) } }
-                }
+                })
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -65,7 +65,7 @@ struct ChatDetailView: View {
                     Image(systemName: selectedData == nil ? "paperclip" : "checkmark.circle.fill")
                         .font(.title3)
                 }
-                .onChange(of: selectedItem) { _, item in
+                .onChange(of: selectedItem, perform: { item in
                     guard let item else { return }
                     Task {
                         // Try images first
@@ -75,7 +75,7 @@ struct ChatDetailView: View {
                             selectedData = nil; selectedMime = nil
                         }
                     }
-                }
+                })
                 TextField("Message", text: $input)
                     .textFieldStyle(.roundedBorder)
                 Button { Task { await send() } } label: {

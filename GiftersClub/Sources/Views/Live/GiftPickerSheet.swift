@@ -51,7 +51,7 @@ struct GiftPickerSheet: View {
             .navigationTitle("Send a Gift")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
             .task { await load() }
-            .onChange(of: sort) { _, _ in Task { await load() } }
+            .onChange(of: sort, perform: { _ in Task { await load() } })
         }
     }
 

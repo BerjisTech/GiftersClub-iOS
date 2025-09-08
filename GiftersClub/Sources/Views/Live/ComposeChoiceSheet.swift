@@ -29,12 +29,10 @@ struct ComposeChoiceSheet: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 20)
         .presentationDetents([.height(220), .medium])
-        .presentationCornerRadius(20)
-        .presentationBackground(.ultraThinMaterial)
+        .sheetStyleCompat()
     }
 }
 
 #Preview {
     ComposeChoiceSheet(onCreatePost: {}, onGoLive: {})
 }
-

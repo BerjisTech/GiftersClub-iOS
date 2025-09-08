@@ -375,7 +375,7 @@ struct CreatePostCameraView: View {
                             PhotosPicker(selection: $pickerItems, maxSelectionCount: 6, matching: .any(of: [.images, .videos])) {
                                 Image(systemName: "photo.on.rectangle").font(.title3).foregroundStyle(.white)
                             }
-                            .onChange(of: pickerItems) { _, newItems in
+                            .onChange(of: pickerItems, perform: { newItems in
                                 Task {
                                     var loaded: [CreatePostViewModel.MediaItem] = []
                                     for item in newItems {
@@ -387,7 +387,7 @@ struct CreatePostCameraView: View {
                                     }
                                     await MainActor.run { vm.media = loaded; activeSheet = .details }
                                 }
-                            }
+                            })
                         }
                         .frame(width: 140)
                     }

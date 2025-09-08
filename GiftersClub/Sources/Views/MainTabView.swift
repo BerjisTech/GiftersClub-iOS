@@ -80,18 +80,18 @@ struct MainTabView: View {
             if let u = note.object as? String { profileRouteUsername = u }
             rootTab = .profile
         }
-        .onChange(of: rootTab) { _, newValue in
+        .onChange(of: rootTab, perform: { newValue in
             if newValue == .profile && programmaticSelectProfile == false {
                 NotificationCenter.default.post(name: .showCurrentProfile, object: nil)
             }
             if newValue != .profile { programmaticSelectProfile = false }
-        }
-        .onChange(of: deepLink) { _, link in
+        })
+        .onChange(of: deepLink, perform: { link in
             guard let link else { return }
             route(link)
             // Clear after handling
             self.deepLink = nil
-        }
+        })
         .onReceive(NotificationCenter.default.publisher(for: .exploreSearch)) { note in
             if let q = note.object as? String {
                 exploreQuery = q
@@ -192,9 +192,9 @@ struct ProfileView: View {
             }
         }
         .environmentObject(drawer)
-        .onChange(of: routeUsername) { _, newValue in
+        .onChange(of: routeUsername, perform: { newValue in
             if let u = newValue { username = u; showGifter = true; routeUsername = nil }
-        }
+        })
         .onAppear {
             if let u = routeUsername { username = u; showGifter = true; routeUsername = nil }
         }

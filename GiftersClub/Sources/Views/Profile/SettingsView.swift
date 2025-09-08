@@ -96,7 +96,7 @@ private struct SettingsDetailView: View {
                 .frame(width: 72, height: 72)
                 .clipShape(Circle())
                 PhotosPicker(selection: $selectedItem, matching: .images) { Text("Change Photo") }
-                .onChange(of: selectedItem) { _, item in
+                .onChange(of: selectedItem, perform: { item in
                     guard let item else { return }
                     Task {
                         if let data = try? await item.loadTransferable(type: Data.self), let ui = UIImage(data: data), let jpeg = ui.jpegData(compressionQuality: 0.85) {
@@ -104,7 +104,7 @@ private struct SettingsDetailView: View {
                         }
                         await MainActor.run { selectedItem = nil }
                     }
-                }
+                })
             }
             TextField("Username", text: $username).textInputAutocapitalization(.never).disableAutocorrection(true)
             TextField("Name", text: $name)
@@ -119,7 +119,7 @@ private struct SettingsDetailView: View {
             TextField("Search @username", text: $searchUsername)
                 .textInputAutocapitalization(.never)
                 .disableAutocorrection(true)
-                .onChange(of: searchUsername) { _, newVal in Task { await loadSuggestions(prefix: newVal) } }
+                .onChange(of: searchUsername, perform: { newVal in Task { await loadSuggestions(prefix: newVal) } })
             if !suggestions.isEmpty {
                 VStack(spacing: 6) {
                     ForEach(suggestions, id: \.user_id) { prof in
@@ -240,7 +240,7 @@ private struct SettingsDetailView: View {
         }
         .padding()
         .presentationDetents([.medium])
-        .presentationCornerRadius(20)
+        .sheetStyleCompat()
     }
 
     // MARK: - Loads & Actions

@@ -263,7 +263,7 @@ struct LiveViewerView: View {
                 await supa.recordViewerLeave(streamId: live.id)
             }
         }
-        .onChange(of: ended) { _, isEnded in if isEnded { NotificationCenter.default.post(name: .showBottomBar, object: nil) } }
+        .onChange(of: ended, perform: { isEnded in if isEnded { NotificationCenter.default.post(name: .showBottomBar, object: nil) } })
     }
 
     private var matchBar: some View {

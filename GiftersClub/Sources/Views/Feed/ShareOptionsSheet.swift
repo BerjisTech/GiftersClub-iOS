@@ -27,8 +27,7 @@ struct ShareOptionsSheet: View {
             ActivityView(activityItems: [url])
         }
         .presentationDetents([.height(180), .medium])
-        .presentationCornerRadius(20)
-        .presentationBackground(.ultraThinMaterial)
+        .sheetStyleCompat()
     }
 
     private func copy() {
@@ -44,4 +43,3 @@ private struct ActivityView: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
-

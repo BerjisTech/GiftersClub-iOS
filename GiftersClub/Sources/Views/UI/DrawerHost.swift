@@ -36,8 +36,7 @@ struct DrawerHost<Content: View>: View {
             .sheet(isPresented: $drawer.isPresented) {
                 DrawerSheet(model: drawer.model) { drawer.dismiss() }
                     .presentationDetents(drawer.model.detents)
-                    .presentationCornerRadius(20)
-                    .presentationBackground(.ultraThinMaterial)
+                    .sheetStyleCompat()
             }
     }
 }

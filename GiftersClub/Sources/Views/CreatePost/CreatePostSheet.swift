@@ -94,7 +94,7 @@ struct CreatePostSheet: View {
                     .padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06)))
                 }
-                .onChange(of: vm.selectedPickerItems) { _, _ in vm.loadPickerItems() }
+                .onChange(of: vm.selectedPickerItems, perform: { _ in vm.loadPickerItems() })
             }
             .frame(maxWidth: .infinity)
 
@@ -189,9 +189,9 @@ struct CreatePostSheet: View {
                 }
             }
             .pickerStyle(.segmented)
-            .onChange(of: vm.accessType) { _, t in
+            .onChange(of: vm.accessType, perform: { t in
                 if t == .subscription { Task { await loadMyPlans() } }
-            }
+            })
 
             if vm.accessType == .subscription {
                 if vm.availablePlans.isEmpty {
@@ -642,7 +642,7 @@ private struct FullscreenMediaEditor: View {
                 .background(Color.black.opacity(0.3))
             }
         }
-        .onChange(of: current) { _, _ in updatePreview() }
+        .onChange(of: current, perform: { _ in updatePreview() })
         .onAppear { updatePreview() }
     }
 

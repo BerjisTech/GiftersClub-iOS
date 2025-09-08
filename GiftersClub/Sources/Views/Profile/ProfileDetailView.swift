@@ -59,7 +59,7 @@ struct ProfileDetailView: View {
                 .toolbar { toolbar }
             }
             .navigationTitle("")
-            .toolbarTitleDisplayMode(.inline)
+            .titleDisplayInlineCompat()
             .loadingOverlay(isLoading)
             .task(id: loadKey) {
                 if !hasLoadedOnce {

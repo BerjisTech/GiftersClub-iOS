@@ -41,7 +41,7 @@ struct ExploreView: View {
             .onPreferenceChange(SearchBarHeightKey.self) { searchBarHeight = $0 }
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .navigationBarHidden(true)
-            .navigationDestination(item: $selectedPost) { post in
+            .navigationDestinationCompat(item: $selectedPost) { post in
                 let media: PostViewerModel.Media = {
                     if let first = post.media?.first, let u = first.url, let url = URL(string: u) {
                         if first.media_type == "video" { return .video(url) }
@@ -58,13 +58,13 @@ struct ExploreView: View {
                     media: media
                 ))
             }
-            .navigationDestination(item: $selectedUser) { user in
+            .navigationDestinationCompat(item: $selectedUser) { user in
                 // Avoid nested stacks: push the profile detail directly
                 ProfileDetailView(username: user.username)
             }
             .task { await loadSuggestions() }
             .onAppear { consumeExternalQueryIfNeeded() }
-            .onChange(of: externalQuery) { _, _ in consumeExternalQueryIfNeeded() }
+            .onChange(of: externalQuery, perform: { _ in consumeExternalQueryIfNeeded() })
         }
     }
 
@@ -84,7 +84,7 @@ private struct SearchBarHeightKey: PreferenceKey {
                 .textInputAutocapitalization(.never)
                 .disableAutocorrection(true)
                 .focused($focused)
-                .onChange(of: query) { _, new in debounceSearch(new) }
+                .onChange(of: query, perform: { new in debounceSearch(new) })
             if isSearching && !query.isEmpty {
                 ProgressView().progressViewStyle(.circular)
             } else if !query.isEmpty {

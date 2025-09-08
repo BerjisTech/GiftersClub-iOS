@@ -58,8 +58,7 @@ struct CommentsSheet: View {
         }
         .task { await load() }
         .presentationDetents([.medium, .large])
-        .presentationCornerRadius(20)
-        .presentationBackground(.ultraThinMaterial)
+        .sheetStyleCompat()
     }
 
     private func load() async {

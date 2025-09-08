@@ -88,13 +88,13 @@ struct HomeView: View {
             guard let id = note.object as? String, let p = posts.first(where: { $0.id == id }) else { return }
             sharePost = p
         }
-        .onChange(of: selection) { _, newIndex in
+        .onChange(of: selection, perform: { newIndex in
             // Load more when near the end
             if newIndex >= posts.count - 3 {
                 Task { await loadMoreIfNeeded() }
             }
-        }
-        .navigationDestination(item: $selectedLive) { live in
+        })
+        .navigationDestinationCompat(item: $selectedLive) { live in
             LiveEntryDestination(live: live)
         }
     }
@@ -367,9 +367,9 @@ struct PostPageView: View {
             if !hasAccess { paywall }
         }
         .simultaneousGesture(doubleTap)
-        .onChange(of: isActive) { _, active in
+        .onChange(of: isActive, perform: { active in
             if !active { isPaused = false; magnify = 1.0 }
-        }
+        })
         .background(Color.black)
         .onAppear {
             if let t = post.accessType, t != "free", !isOwnPost { hasAccess = false }
@@ -641,9 +641,9 @@ private struct VideoBackgroundView: View {
                 if player == nil { player = AVPlayer(url: url) }
                 if play { player?.play() }
             }
-            .onChange(of: play) { _, playing in
+            .onChange(of: play, perform: { playing in
                 if playing { player?.play() } else { player?.pause() }
-            }
+            })
             .onDisappear { player?.pause() }
     }
 }

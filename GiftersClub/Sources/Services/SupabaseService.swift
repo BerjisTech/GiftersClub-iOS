@@ -53,12 +53,18 @@ final class SupabaseManager: ObservableObject {
                 redirectTo: SupabaseConfig.redirectURL
             )
         } catch {
+            #if DEBUG
             print("Google OAuth start failed: \(error)")
+            #endif
         }
     }
 
     func signOut() async {
-        do { try await client.auth.signOut() } catch { print("Sign out failed: \(error)") }
+        do { try await client.auth.signOut() } catch {
+            #if DEBUG
+            print("Sign out failed: \(error)")
+            #endif
+        }
     }
 
     func handleOpenURL(_ url: URL) {

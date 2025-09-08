@@ -91,7 +91,7 @@ struct GiftSendSheet: View {
                 TextField("Search users by name, @username, or email", text: $query)
                     .textInputAutocapitalization(.never)
                     .disableAutocorrection(true)
-                    .onChange(of: query) { _, new in debounceSearch(new) }
+                    .onChange(of: query, perform: { new in debounceSearch(new) })
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))

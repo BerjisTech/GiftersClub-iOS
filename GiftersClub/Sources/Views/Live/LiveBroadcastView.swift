@@ -463,7 +463,7 @@ struct LiveBroadcastView: View {
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
                         .textFieldStyle(.roundedBorder)
-                        .onChange(of: inviteQuery) { _, new in Task { await searchInvite(new) } }
+                        .onChange(of: inviteQuery, perform: { new in Task { await searchInvite(new) } })
                     if !inviteSuggestions.isEmpty {
                         List(inviteSuggestions, id: \.user_id) { u in
                             HStack {
@@ -500,7 +500,7 @@ struct LiveBroadcastView: View {
                             .textInputAutocapitalization(.never)
                             .disableAutocorrection(true)
                             .textFieldStyle(.roundedBorder)
-                            .onChange(of: addQuery) { _, new in Task { await searchAdd(new) } }
+                            .onChange(of: addQuery, perform: { new in Task { await searchAdd(new) } })
                         if !addSuggestions.isEmpty {
                             List(addSuggestions, id: \.user_id) { u in
                                 HStack {
