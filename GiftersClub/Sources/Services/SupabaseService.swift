@@ -11,6 +11,7 @@ final class SupabaseManager: ObservableObject {
 
     @Published var user: Auth.User?
     @Published var isLoading: Bool = true
+    @Published var needsUsernameSetup: Bool = false
 
     private init() {
         client = SupabaseClient(
@@ -40,12 +41,31 @@ final class SupabaseManager: ObservableObject {
                 }
                 if state.event == .signedIn, let user = state.session?.user {
                     await self.ensureProfile(user: user)
+                    await self.evaluateUsernameRequirement()
+                    await MainActor.run {
+                        if self.needsUsernameSetup == false {
+                            NotificationCenter.default.post(name: Notification.Name("signedIn"), object: nil)
+                        }
+                    }
                 }
             }
         }
     }
 
-    // Google sign-in removed: native Apple Sign in only
+    // MARK: - Google OAuth (web flow)
+    @MainActor
+    func signInWithGoogle() async {
+        do {
+            _ = try await client.auth.signInWithOAuth(
+                provider: .google,
+                redirectTo: SupabaseConfig.redirectURL
+            )
+        } catch {
+            #if DEBUG
+            print("Google OAuth start failed: \(error)")
+            #endif
+        }
+    }
 
     func signOut() async {
         do { try await client.auth.signOut() } catch {
@@ -66,39 +86,75 @@ final class SupabaseManager: ObservableObject {
     ///   - idToken: JWT returned by ASAuthorizationAppleIDCredential.identityToken
     ///   - nonce: The original nonce you hashed and sent in the Apple request
     @MainActor
-    func signInWithApple(idToken: String, nonce: String) async {
-        do {
-            _ = try await client.auth.signInWithIdToken(
-                credentials: .init(
-                    provider: .apple,
-                    idToken: idToken,
-                    nonce: nonce
-                )
+    func signInWithApple(idToken: String, nonce: String) async throws {
+        _ = try await client.auth.signInWithIdToken(
+            credentials: .init(
+                provider: .apple,
+                idToken: idToken,
+                nonce: nonce
             )
+        )
+    }
+
+    // Create a minimal profile row if missing
+    func ensureProfile(user: Auth.User) async {
+        do {
+            let existing: PostgrestResponse<[DBProfile]> = try await client
+                .from("profiles")
+                .select()
+                .eq("user_id", value: user.id)
+                .limit(1)
+                .execute()
+            if existing.value.isEmpty {
+                let email = user.email ?? ""
+                _ = try await client
+                    .from("profiles")
+                    .insert([["user_id": user.id, "email": email]])
+                    .execute()
+            }
+        } catch { #if DEBUG
+            print("ensureProfile error: \(error)")
+        #endif }
+    }
+
+    // Evaluate if we must force a username prompt (relay emails or missing username)
+    @MainActor
+    func evaluateUsernameRequirement() async {
+        guard let me = user?.id.uuidString else { needsUsernameSetup = false; return }
+        do {
+            let prof = try await fetchProfile(username: nil, userId: me)
+            let email = user?.email ?? prof?.email ?? ""
+            let isRelay = email.lowercased().contains("privaterelay.appleid.com")
+            let missingUsername = (prof?.username ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            needsUsernameSetup = isRelay || missingUsername
         } catch {
-            #if DEBUG
-            print("Apple sign-in failed: \(error)")
-            #endif
+            needsUsernameSetup = true
         }
     }
 
-    // TODO: mirror Angular's handleProfile (create/update profile row)
-    func ensureProfile(user: Auth.User) async {
-        // Example (uncomment and adapt to your schema):
-        // struct Profile: Codable { let user_id: String; let email: String? }
-        // do {
-        //     let existing: [Profile] = try await client.database
-        //         .from("profiles")
-        //         .select()
-        //         .eq("user_id", value: user.id)
-        //         .execute()
-        //         .decoded()
-        //     if existing.isEmpty {
-        //         try await client.database.from("profiles").insert(values: [
-        //             ["user_id": user.id, "email": user.email ?? ""]
-        //         ]).execute()
-        //     }
-        // } catch { print("ensureProfile error: \(error)") }
+    // Validate and set username
+    func setUsername(_ newUsername: String) async throws {
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        let uname = newUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard uname.range(of: "^[A-Za-z0-9_]{3,20}$", options: .regularExpression) != nil else {
+            throw NSError(domain: "Username", code: 1, userInfo: [NSLocalizedDescriptionKey: "Username must be 3–20 letters, numbers, or _"])
+        }
+        // Check availability
+        let exists: PostgrestResponse<[DBProfile]> = try await client
+            .from("profiles")
+            .select("user_id")
+            .eq("username", value: uname)
+            .limit(1)
+            .execute()
+        if !exists.value.isEmpty { throw NSError(domain: "Username", code: 2, userInfo: [NSLocalizedDescriptionKey: "Username is taken"]) }
+        // Update
+        struct Patch: Encodable { let username: String }
+        _ = try await client
+            .from("profiles")
+            .update(Patch(username: uname))
+            .eq("user_id", value: me)
+            .execute()
+        await MainActor.run { self.needsUsernameSetup = false }
     }
 
     // MARK: - Data Models (Decodable)

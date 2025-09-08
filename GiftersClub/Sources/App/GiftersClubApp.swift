@@ -20,6 +20,8 @@ struct GiftersClubApp: App {
                     LoadingOverlay(isPresented: true)
                 } else if supabase.user == nil {
                     AuthView()
+                } else if supabase.needsUsernameSetup {
+                    UsernameOnboardingView()
                 } else {
                     MainTabView(deepLink: $deepLink)
                 }
@@ -28,11 +30,6 @@ struct GiftersClubApp: App {
                 // OAuth callback
                 if url.scheme == "gifterclub", url.host == "login-callback" {
                     supabase.handleOpenURL(url)
-                    return
-                }
-                // Payment callback (web checkout)
-                if url.scheme == "gifterclub", url.host == "payment-callback" {
-                    PaymentCoordinator.shared.handleWebCallback(url)
                     return
                 }
                 // App deep links

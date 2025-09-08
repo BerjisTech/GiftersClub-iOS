@@ -11,6 +11,8 @@ struct GiftSendSheet: View {
     @State private var selected: SupabaseManager.DBProfile? = nil
     @State private var errorText: String? = nil
     @State private var isSending = false
+    @State private var showTopUp = false
+    @State private var missingTokens: Int? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -44,10 +46,10 @@ struct GiftSendSheet: View {
             if let err = errorText {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(err).font(.footnote).foregroundStyle(.red)
-                    Button(action: { Task { await startTopup() } }) {
+                    Button(action: { showTopUp = true }) {
                         HStack(spacing: 8) {
                             Image("token").resizable().renderingMode(.original).frame(width: 16, height: 16)
-                            Text("Top up with Flutterwave")
+                            Text("Buy tokens")
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -59,6 +61,9 @@ struct GiftSendSheet: View {
         .padding(.horizontal)
         .padding(.bottom, 12)
         .onAppear { Task { await prefillIfNeeded() } }
+        .sheet(isPresented: $showTopUp) {
+            TokenTopUpSheet(initialAmount: missingTokens, onCompleted: { _ in })
+        }
     }
 
     @ViewBuilder
@@ -151,8 +156,8 @@ struct GiftSendSheet: View {
                 await MainActor.run {
                     let missing = max(tokens - balance, 0)
                     errorText = "Insufficient tokens (you have \(balance), you need \(missing) more). Please top up."
+                    missingTokens = missing
                 }
-                // TODO: Integrate Flutterwave top-up flow on iOS
                 return
             }
             await MainActor.run { isSending = true; errorText = nil }
@@ -166,42 +171,7 @@ struct GiftSendSheet: View {
         }
     }
 
-    // MARK: - Flutterwave Top-up
-    private func startTopup() async {
-        guard let me = supabase.user?.id.uuidString, let _ = gift.tokens else { return }
-        do {
-            // Compute missing amount
-            let profile = try await supabase.fetchProfile(username: nil, userId: me)
-            let missing = max((gift.tokens ?? 0) - (profile?.token_balance ?? 0), 0)
-            let amount = max(missing, gift.tokens ?? 0)
-            // Record initial token transaction
-            let txRef = "topup_\(me)_\(Int(Date().timeIntervalSince1970))"
-            let insert = SupabaseManager.TokenTransactionInsert(
-                user_id: me,
-                transaction_type: "purchase",
-                tokens: amount,
-                kes_amount: amount,
-                flutterwave_transaction_id: txRef,
-                flutterwave_transaction_status: "initiated",
-                reference_id: txRef
-            )
-            _ = try? await supabase.recordTokenTransaction(insert)
-            // NOTE: For iOS, integrate Flutterwave SDK or Hosted Checkout.
-            // Placeholder: open Flutterwave docs if key not configured
-            if SupabaseConfig.flutterwavePublicKey.isEmpty {
-                if let url = URL(string: "https://flutterwave.com/ng/docs/accept-payments/collections/standard/ios") {
-                    await MainActor.run { UIApplication.shared.open(url) }
-                }
-            } else {
-                // TODO: Implement hosted checkout using public key and txRef
-                // For now, open dashboard top-up on web
-                let url = SupabaseConfig.webBase.appendingPathComponent("dashboard").appending(queryItems: [URLQueryItem(name: "topup", value: String(amount))])
-                await MainActor.run { UIApplication.shared.open(url) }
-            }
-        } catch {
-            await MainActor.run { errorText = "Unable to start top-up. Please try again." }
-        }
-    }
+    // No non-IAP top-up paths on iOS
 }
 
 // Small helper to append query items

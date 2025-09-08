@@ -3,6 +3,8 @@ import AuthenticationServices
 
 struct AuthView: View {
     @State private var currentNonce: String?
+    @State private var errorText: String? = nil
+    @State private var isLoadingGoogle: Bool = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -14,17 +16,17 @@ struct AuthView: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
-#if targetEnvironment(simulator)
-            Button(action: simSignInWithGoogle) {
+            Button(action: signInGoogle) {
                 HStack(spacing: 8) {
-                    Image(systemName: "globe")
-                    Text("Continue with Google (sim)")
+                    if isLoadingGoogle { ProgressView().progressViewStyle(.circular) }
+                    else { Image(systemName: "globe") }
+                    Text(isLoadingGoogle ? "Signing in…" : "Continue with Google")
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .disabled(isLoadingGoogle)
             .padding(.horizontal, 24)
-#endif
             // Sign in with Apple (native)
             SignInWithAppleButton(.signIn) { request in
                 let nonce = randomNonceString()
@@ -39,14 +41,23 @@ struct AuthView: View {
                           let tokenData = credential.identityToken,
                           let idToken = String(data: tokenData, encoding: .utf8),
                           let nonce = currentNonce else { return }
-                    Task { await SupabaseManager.shared.signInWithApple(idToken: idToken, nonce: nonce) }
+                    Task {
+                        do {
+                            try await SupabaseManager.shared.signInWithApple(idToken: idToken, nonce: nonce)
+                        } catch {
+                            await MainActor.run { errorText = "Sign in failed. Please try again later." }
+                        }
+                    }
                 case .failure:
-                    break
+                    errorText = "Sign in was cancelled or failed."
                 }
             }
             .signInWithAppleButtonStyle(.black)
             .frame(height: 45)
             .padding(.horizontal, 24)
+            .alert("Sign in error", isPresented: Binding(get: { errorText != nil }, set: { _ in errorText = nil })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(errorText ?? "") }
             Spacer()
         }
     }
@@ -87,17 +98,10 @@ private func sha256(_ input: String) -> String {
     return hashed.compactMap { String(format: "%02x", $0) }.joined()
 }
 
-#if targetEnvironment(simulator)
-private func simSignInWithGoogle() {
+private func signInGoogle() {
+    isLoadingGoogle = true
     Task {
-        do {
-            _ = try await SupabaseManager.shared.client.auth.signInWithOAuth(
-                provider: .google,
-                redirectTo: SupabaseConfig.redirectURL
-            )
-        } catch {
-            // ignore in simulator
-        }
+        await SupabaseManager.shared.signInWithGoogle()
+        isLoadingGoogle = false
     }
 }
-#endif

@@ -126,6 +126,9 @@ struct MainTabView: View {
                 NotificationCenter.default.post(name: .showCurrentProfile, object: nil)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .signedIn)) { _ in
+            banners.show(Banner(title: "Signed in", style: .success, duration: 2))
+        }
         .onReceive(NotificationCenter.default.publisher(for: .hideBottomBar)) { _ in hideBottomBar = true }
         .onReceive(NotificationCenter.default.publisher(for: .showBottomBar)) { _ in hideBottomBar = false }
         .task { startLiveResumePolling() }
@@ -184,6 +187,7 @@ extension Notification.Name {
     static let showBottomBar = Notification.Name("showBottomBar")
     static let openChatWithUsername = Notification.Name("openChatWithUsername")
     static let gotoProfile = Notification.Name("gotoProfile")
+    static let signedIn = Notification.Name("signedIn")
 }
 
 // MARK: - Placeholder Tab Views
