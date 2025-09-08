@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import Supabase
 import Realtime
+import AuthenticationServices
 
 final class SupabaseManager: ObservableObject {
     static let shared = SupabaseManager()
@@ -70,6 +71,28 @@ final class SupabaseManager: ObservableObject {
     func handleOpenURL(_ url: URL) {
         // Hand off OAuth callback to Supabase
         client.auth.handle(url)
+    }
+
+    // MARK: - Sign in with Apple (Native)
+    /// Completes Supabase sign-in using a native Apple ID token + nonce
+    /// - Parameters:
+    ///   - idToken: JWT returned by ASAuthorizationAppleIDCredential.identityToken
+    ///   - nonce: The original nonce you hashed and sent in the Apple request
+    @MainActor
+    func signInWithApple(idToken: String, nonce: String) async {
+        do {
+            _ = try await client.auth.signInWithIdToken(
+                credentials: .init(
+                    provider: .apple,
+                    idToken: idToken,
+                    nonce: nonce
+                )
+            )
+        } catch {
+            #if DEBUG
+            print("Apple sign-in failed: \(error)")
+            #endif
+        }
     }
 
     // TODO: mirror Angular's handleProfile (create/update profile row)

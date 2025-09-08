@@ -1,7 +1,8 @@
 import SwiftUI
+import AuthenticationServices
 
 struct AuthView: View {
-    @State private var isLoading = false
+    @State private var currentNonce: String?
 
     var body: some View {
         VStack(spacing: 24) {
@@ -13,34 +14,64 @@ struct AuthView: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
-            Button(action: signIn) {
-                HStack(spacing: 8) {
-                    if isLoading {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                    } else {
-                        Image(systemName: "globe")
-                    }
-                    Text(isLoading ? "Signing in…" : "Continue with Google")
+            // Sign in with Apple (native)
+            SignInWithAppleButton(.signIn) { request in
+                let nonce = randomNonceString()
+                currentNonce = nonce
+                request.requestedScopes = [.fullName, .email]
+                // Send SHA256(nonce) as per Apple’s recommended flow
+                request.nonce = sha256(nonce)
+            } onCompletion: { result in
+                switch result {
+                case .success(let auth):
+                    guard let credential = auth.credential as? ASAuthorizationAppleIDCredential,
+                          let tokenData = credential.identityToken,
+                          let idToken = String(data: tokenData, encoding: .utf8),
+                          let nonce = currentNonce else { return }
+                    Task { await SupabaseManager.shared.signInWithApple(idToken: idToken, nonce: nonce) }
+                case .failure:
+                    break
                 }
-                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(isLoading)
+            .signInWithAppleButtonStyle(.black)
+            .frame(height: 45)
             .padding(.horizontal, 24)
             Spacer()
         }
     }
 
-    private func signIn() {
-        isLoading = true
-        Task {
-            await SupabaseManager.shared.signInWithGoogle()
-            isLoading = false
-        }
-    }
 }
 
 struct AuthView_Previews: PreviewProvider {
     static var previews: some View { AuthView() }
+}
+
+// MARK: - Nonce Helpers
+private func randomNonceString(length: Int = 32) -> String {
+    precondition(length > 0)
+    let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+    var result = ""
+    var remainingLength = length
+
+    while remainingLength > 0 {
+        var randoms: [UInt8] = (0..<16).map { _ in UInt8.random(in: 0...255) }
+        randoms.withUnsafeMutableBytes { bytes in
+            for idx in 0..<bytes.count {
+                if remainingLength == 0 { break }
+                let rand = Int(bytes[idx])
+                if rand < charset.count {
+                    result.append(charset[rand])
+                    remainingLength -= 1
+                }
+            }
+        }
+    }
+    return result
+}
+
+import CryptoKit
+private func sha256(_ input: String) -> String {
+    let data = Data(input.utf8)
+    let hashed = SHA256.hash(data: data)
+    return hashed.compactMap { String(format: "%02x", $0) }.joined()
 }

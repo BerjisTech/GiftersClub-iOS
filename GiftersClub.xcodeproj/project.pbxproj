@@ -14,6 +14,7 @@
 		905EEF242E4686430073CC52 /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = 905EEF232E4686430073CC52 /* Realtime */; };
 		905EEF262E4686430073CC52 /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = 905EEF252E4686430073CC52 /* Storage */; };
 		905EEF282E4686430073CC52 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 905EEF272E4686430073CC52 /* Supabase */; };
+		90F76CAF2E6F4D9600AD2FBF /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 90F76CAE2E6F4D9600AD2FBF /* StoreKit.framework */; };
 		A0B1C2D43E4F5A6B7C8D9E01 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = A0B1C2D53E4F5A6B7C8D9E02 /* Lottie */; };
 /* End PBXBuildFile section */
 
@@ -51,11 +52,25 @@
 		905EEEE62E467EFA0073CC52 /* GiftersClub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GiftersClub.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		905EEEF32E467EFB0073CC52 /* GiftersClubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GiftersClubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		905EEEFD2E467EFB0073CC52 /* GiftersClubUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GiftersClubUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		90F76CAE2E6F4D9600AD2FBF /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		90F76CB12E6F4E0600AD2FBF /* Exceptions for "GiftersClub" folder in "GiftersClub" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 905EEEE52E467EFA0073CC52 /* GiftersClub */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		905EEEE82E467EFA0073CC52 /* GiftersClub */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				90F76CB12E6F4E0600AD2FBF /* Exceptions for "GiftersClub" folder in "GiftersClub" target */,
+			);
 			path = GiftersClub;
 			sourceTree = "<group>";
 		};
@@ -76,6 +91,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				90F76CAF2E6F4D9600AD2FBF /* StoreKit.framework in Frameworks */,
 				905EEF222E4686430073CC52 /* PostgREST in Frameworks */,
 				905EEF202E4686430073CC52 /* Functions in Frameworks */,
 				905EEF282E4686430073CC52 /* Supabase in Frameworks */,
@@ -107,6 +123,7 @@
 		9005BD142E51184700611209 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				90F76CAE2E6F4D9600AD2FBF /* StoreKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -221,7 +238,12 @@
 				TargetAttributes = {
 					905EEEE52E467EFA0073CC52 = {
 						CreatedOnToolsVersion = 16.4;
+					SystemCapabilities = {
+						com.apple.InAppPurchase = { enabled = 1; };
+						com.apple.Push = { enabled = 1; };
+						com.apple.SignInWithApple = { enabled = 1; };
 					};
+};
 					905EEEF22E467EFB0073CC52 = {
 						CreatedOnToolsVersion = 16.4;
 						TestTargetID = 905EEEE52E467EFA0073CC52;
@@ -449,9 +471,10 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = BU7DW434G5;
+				DEVELOPMENT_TEAM = SAZBQ79X56;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = GiftersClub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Gifters Club";
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLSchemes =     (\n        gifterclub\n    );\n}";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
@@ -485,6 +508,7 @@
 				"ASSETCATALOG_COMPILER_APPICON_NAME[sdk=iphoneos*]" = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CODE_SIGN_ENTITLEMENTS = GiftersClub/GiftersClubRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -492,6 +516,7 @@
 				DEVELOPMENT_TEAM = SAZBQ79X56;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = GiftersClub/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Gifters Club";
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLSchemes =     (\n        gifterclub\n    );\n}";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
