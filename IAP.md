@@ -12,16 +12,16 @@ This doc captures the minimal, repeatable process to ship consumable token packs
 
 We sell tokens (coins) as consumable products; users spend tokens on gifts and wishlists. Gifts are NOT IAP items.
 
-- Current product ID: `gift_token` priced at $0.99.
-- Grant: 70 tokens per purchase (approx. 30% platform fee accounted).
+- Current product ID: `token_100` (consumable).
+- Grant: 100 tokens per purchase.
 - If pricing or fee assumptions change, you can adjust the token grant here (client) and/or on the server mapping.
 
 ## Create IAP Products in App Store Connect
 
 1. ASC → My Apps → Your App → In‑App Purchases → + → New In‑App Purchase.
 2. Type: Consumable.
-3. Reference Name: Human label (e.g., "Tokens 70").
-4. Product ID: Must match the app (e.g., `gift_token`).
+3. Reference Name: Human label (e.g., "Tokens 100").
+4. Product ID: Must match the app (e.g., `token_100`).
 5. Pricing: Choose a Price Tier. You can customize per region later.
 6. Localizations: Add Display Name and Description for at least your primary locale.
 7. Cleared for Sale: Yes.
@@ -68,7 +68,7 @@ Review Information (what to include):
 
 Update these when you finalize product IDs or token counts:
 
-- File: `GiftersClub-iOS/GiftersClub/Sources/Services/StoreKitService.swift` (set `gift_token` and token grant)
+- File: `GiftersClub-iOS/GiftersClub/Sources/Services/StoreKitService.swift` (set `token_100` and token grant)
 - (Optional) Move productId→tokens mapping to a Supabase config table for remote control.
 
 ## Server Validation Flow (Supabase Edge Function)

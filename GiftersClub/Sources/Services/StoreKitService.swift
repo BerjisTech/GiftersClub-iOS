@@ -17,10 +17,10 @@ final class StoreKitService: ObservableObject {
         var packName: String { displayName ?? id }
     }
 
-    // Single-token product at $0.99 that grants 70 tokens (accounts for ~30% fee)
-    // If you adjust pricing or fee assumptions, update the token count accordingly.
+    // Single consumable product that grants 100 tokens.
+    // Ensure App Store Connect product ID matches `token_100`.
     @Published var packs: [TokenPack] = [
-        .init(id: "gift_token", tokens: 70)
+        .init(id: "token_100", tokens: 100)
     ]
     @Published var isLoading = false
 
