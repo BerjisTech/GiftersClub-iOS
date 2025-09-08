@@ -45,20 +45,7 @@ final class SupabaseManager: ObservableObject {
         }
     }
 
-    @MainActor
-    func signInWithGoogle() async {
-        do {
-            // ASWebAuthenticationSession variant auto-handles the web flow
-            _ = try await client.auth.signInWithOAuth(
-                provider: .google,
-                redirectTo: SupabaseConfig.redirectURL
-            )
-        } catch {
-            #if DEBUG
-            print("Google OAuth start failed: \(error)")
-            #endif
-        }
-    }
+    // Google sign-in removed: native Apple Sign in only
 
     func signOut() async {
         do { try await client.auth.signOut() } catch {

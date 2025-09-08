@@ -1,6 +1,6 @@
 # iOS Build & TestFlight Guide (with IAP)
 
-This guide walks you from a clean project to an uploaded build in App Store Connect (ASC), ready for TestFlight and linking your in‑app purchase `gift_token`.
+This guide walks you from a clean project to an uploaded build in App Store Connect (ASC), ready for TestFlight and linking your in‑app purchase `token_100`.
 
 ## Prerequisites
 
@@ -105,11 +105,11 @@ Push Notifications (APNs) quick checklist:
 - Backend (Supabase Edge Functions): configure env like `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_P8` to send server‑side pushes.
 - Xcode: add “Push Notifications” capability. In‑app: request permission with `UNUserNotificationCenter` and register for remote notifications.
 
-## 2) Add the IAP product in ASC (gift_token)
+## 2) Add the IAP product in ASC (token_100)
 
 1. App Store Connect → My Apps → Your App → In‑App Purchases → +.
 2. Type: Consumable.
-3. Product ID: `gift_token` (must match the app code).
+3. Product ID: `token_100` (must match the app code).
 4. Price: $0.99 tier.
 5. Localizations: name/description screenshot as required.
 6. Cleared for sale: Yes.
@@ -119,7 +119,7 @@ Tip: You can leave this IAP in “Ready to Submit” until a production submissi
 ## 3) Local IAP testing (optional but recommended)
 
 Option A: StoreKit Configuration (no ASC required)
-- A ready file is included: `GiftersClub/GiftersClub/StoreKit/GiftersClub.storekit` with `gift_token` at $0.99.
+- A ready file is included: `GiftersClub/GiftersClub/StoreKit/GiftersClub.storekit` with `token_100` at $0.99.
 - In Xcode: Scheme → Edit Scheme → Run → Options → StoreKit Configuration → select this file.
 
 Option B: Sandbox Tester (real StoreKit)
@@ -178,13 +178,13 @@ After upload, ASC will process the build (5–30 minutes). Once processing compl
 - External testers: require Beta App Review. Create a group, add your build, fill compliance info, then submit for beta review.
 
 IAP in TestFlight:
-- Internal testers can test `gift_token` without IAP approval. External testers require the IAP to be approved or included with an app submission.
+- Internal testers can test `token_100` without IAP approval. External testers require the IAP to be approved or included with an app submission.
 
 ## 7) Link IAP to a production submission (when ready)
 
 1. ASC → Your App → App Store → iOS App → + Version (e.g., 1.0.0).
 2. Add the processed build to this version.
-3. In the “In‑App Purchases” section, add `gift_token` to the version.
+3. In the “In‑App Purchases” section, add `token_100` to the version.
 4. Complete all submission metadata and submit for review.
 
 ## 8) Versioning rules and common pitfalls
@@ -193,7 +193,7 @@ IAP in TestFlight:
 - If you change the Version (e.g., 1.0.0 → 1.0.1), you can reset build numbering or continue incrementing—just ensure each upload has a unique build.
 - Automatic signing avoids most provisioning profile errors. If you see “No profiles for bundle ID”, ensure the Team is correct and the bundle ID exists.
 - Ensure the In‑App Purchase capability is present in the Xcode target.
-- Keep `gift_token` product ID exactly matching the code (`StoreKitService`).
+- Keep `token_100` product ID exactly matching the code (`StoreKitService`).
 
 ## 9) Fastlane (optional automation)
 
@@ -278,12 +278,12 @@ Important: For GitHub-hosted runners, Xcode cannot create signing assets unless 
 
 1. Install the TestFlight build.
 2. Sign in to your app.
-3. Open the token top‑up sheet and purchase `gift_token`.
+3. Open the token top‑up sheet and purchase `token_100`.
 4. Expect: TestFlight sandbox flow, receipt sent to the backend, token balance updates.
 
 If the purchase fails:
 - Check ASC sandbox tester setup.
-- Confirm `gift_token` exists in ASC and is Cleared for Sale.
+- Confirm `token_100` exists in ASC and is Cleared for Sale.
 - Check Xcode console logs and server logs for the Edge Function call.
 
 —
@@ -349,7 +349,7 @@ App Services toggles (in ASC → App Information → App Services):
 
 ## 13) IAP Review Info and Common Statuses
 
-Where to add: ASC → Your App → In‑App Purchases → select `gift_token` → Review Information.
+Where to add: ASC → Your App → In‑App Purchases → select `token_100` → Review Information.
 
 Include in Review Information:
 - Test account credentials (if the purchase UI requires login in your app).
@@ -367,7 +367,7 @@ Test account (internal):
 IAP test instructions:
 1) Launch the app and log in with the test account above.
 2) Open Profile → Buy Tokens.
-3) Select the $0.99 option (gift_token) and confirm purchase.
+3) Select the $0.99 option (token_100) and confirm purchase.
 4) Expected: 70 tokens are credited; balance updates and a success toast appears.
 
 Notes:
@@ -382,7 +382,7 @@ Common IAP statuses (and fixes):
 - Approved: available for production when your app version goes live.
 
 TestFlight specifics:
-- Internal testers can purchase IAP in sandbox even if `gift_token` is not yet approved for production.
+- Internal testers can purchase IAP in sandbox even if `token_100` is not yet approved for production.
 - External testers usually require the IAP to be approved or included with an app submission.
 
 ## 14) Permissions to Request In‑App (and Wording)
@@ -410,7 +410,7 @@ Request timing:
 - Accounts: Apple Developer + App Store Connect set; roles OK.
 - App Record: created with name, bundle ID, basic metadata.
 - Xcode: Team set, Automatic Signing ON, IAP capability added.
-- IAP: `gift_token` created, Cleared for Sale, metadata and screenshot added.
+- IAP: `token_100` created, Cleared for Sale, metadata and screenshot added.
 - StoreKit local config: `GiftersClub.storekit` selected in scheme (optional).
 - Fastlane/CI: secrets added; match repo created and bootstrapped.
 - Build & Upload: run `bundle exec fastlane ios beta` or upload from Organizer.

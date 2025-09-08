@@ -4,7 +4,7 @@ SwiftUI iOS app that mirrors the Android `GiftersClub` and the Angular `gifter-c
 
 ## Overview
 
-- Supabase Google OAuth for sign-in (same project/keys as Angular).
+- Native Sign in with Apple for sign-in (via Supabase Auth).
 - Root router that shows `AuthView` when signed out, `MainTabView` when signed in.
 - Deep links:
   - `gifterclub://login-callback` (OAuth return)
@@ -13,7 +13,7 @@ SwiftUI iOS app that mirrors the Android `GiftersClub` and the Angular `gifter-c
 
 ## Setup
 
-1) Open an Xcode iOS App project named `GiftersClub` (SwiftUI, Swift). Then add the files in `GiftersClub-iOS/Sources/*` to your project.
+1) Open the Xcode project `GiftersClub.xcodeproj`.
 
 2) Add Supabase Swift SDK via Swift Package Manager:
 
@@ -28,26 +28,26 @@ SwiftUI iOS app that mirrors the Android `GiftersClub` and the Angular `gifter-c
 
    Also add Associated Domains if you plan to support universal links later.
 
-4) Supabase Keys
+4) Capabilities
 
-   The app uses the same Supabase credentials as `gifter-club` Angular:
+   - Add “Sign in with Apple” capability to the app target.
+   - Add “Push Notifications” if you plan to use APNs.
+   - In‑App Purchase capability should be enabled on the App ID (no entitlement file needed).
 
-   - URL: `https://xffhtertooztyyotwhrv.supabase.co`
-   - anon key: the same public key in Angular `environment.ts`
+5) Supabase Config
 
-   They are centralized in `SupabaseConfig.swift`. For production, consider moving them into a plist or remote config.
+   Supabase values are centralized in `SupabaseConfig.swift` and match the Angular app (custom domain `https://app.gifters.club`). For production, consider secure storage or remote config for the anon key.
 
-5) Redirect URLs in Supabase Console
+6) Redirect URLs in Supabase Console (optional)
 
-   In Supabase Auth settings, add `gifterclub://login-callback` to Redirect URLs.
+   If you use any web-based auth or fallbacks, add `gifterclub://login-callback` to Redirect URLs. Native Sign in with Apple does not require this.
 
-6) Build and Run
+7) Build and Run
 
-   - Launch the app. Tap “Continue with Google” and complete sign-in.
+   - Launch the app. Tap “Sign in with Apple” and complete sign-in.
    - On success, the app shows `MainTabView` with tabs (Home, Explore, Chat, Wishlists, Profile).
 
 ## Notes
 
 - Profile creation/update logic mirrors Android/Angular but is simplified here. Fill in `ensureProfile` in `SupabaseService.swift` to match your exact schema and behavior.
 - Add push notifications, update prompts, and network checks later to mirror the Android parity if needed.
-
