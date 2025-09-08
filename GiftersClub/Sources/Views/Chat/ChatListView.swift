@@ -8,9 +8,10 @@ struct ChatListView: View {
     @State private var followersCount: Int = 0
     @State private var activityCount: Int = 0
     @State private var systemCount: Int = 0
+    @State private var navPath = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             List {
                 Section {
                     DisclosureGroup(isExpanded: $showGroups) {
@@ -57,6 +58,9 @@ struct ChatListView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Chats")
+            .navigationDestination(for: ConversationItem.Partner.self) { p in
+                ChatDetailView(partner: p)
+            }
             .task {
                 await load()
                 await supabase.subscribeToAllChats { msg in
@@ -85,6 +89,16 @@ struct ChatListView: View {
             }
             .onDisappear { Task { await supabase.unsubscribeAllChats() } }
             .refreshable { await load() }
+            .onReceive(NotificationCenter.default.publisher(for: .openChatWithUsername)) { note in
+                guard let username = note.object as? String else { return }
+                Task {
+                    if let id = try? await supabase.findUserId(byUsername: username) {
+                        await MainActor.run {
+                            navPath.append(ConversationItem.Partner(userId: id, username: username, displayName: username, imageURL: nil))
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -238,12 +238,18 @@
 				TargetAttributes = {
 					905EEEE52E467EFA0073CC52 = {
 						CreatedOnToolsVersion = 16.4;
-					SystemCapabilities = {
-						com.apple.InAppPurchase = { enabled = 1; };
-						com.apple.Push = { enabled = 1; };
-						com.apple.SignInWithApple = { enabled = 1; };
+						SystemCapabilities = {
+							com.apple.InAppPurchase = {
+								enabled = 1;
+							};
+							com.apple.Push = {
+								enabled = 1;
+							};
+							com.apple.SignInWithApple = {
+								enabled = 1;
+							};
+						};
 					};
-};
 					905EEEF22E467EFB0073CC52 = {
 						CreatedOnToolsVersion = 16.4;
 						TestTargetID = 905EEEE52E467EFA0073CC52;

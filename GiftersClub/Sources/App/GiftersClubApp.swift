@@ -1,7 +1,15 @@
 import SwiftUI
+import UIKit
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+        BackgroundUploadManager.shared.setBackgroundCompletionHandler(completionHandler)
+    }
+}
 
 @main
 struct GiftersClubApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var supabase = SupabaseManager.shared
     @State private var deepLink: DeepLink? = nil
 

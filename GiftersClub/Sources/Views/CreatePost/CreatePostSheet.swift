@@ -253,9 +253,9 @@ struct CreatePostSheet: View {
                     return
                 }
                 vm.publish { _ in
-                    banners.show(Banner(title: "Your post has been created", style: .success))
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        NotificationCenter.default.post(name: .goHome, object: nil)
+                    banners.show(Banner(title: "Post uploading in the background", style: .info))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        NotificationCenter.default.post(name: .gotoProfile, object: nil)
                         dismiss()
                     }
                 }

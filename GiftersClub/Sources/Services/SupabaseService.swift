@@ -1823,8 +1823,11 @@ final class SupabaseManager: ObservableObject {
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
         let presign = try JSONDecoder().decode(PresignResponse.self, from: data)
         guard let uploadURL = URL(string: presign.uploadUrl) else { throw URLError(.badURL) }
-        var put = URLRequest(url: uploadURL); put.httpMethod = "PUT"; put.addValue(mimeType, forHTTPHeaderField: "Content-Type")
-        let _ = try await URLSession.shared.upload(for: put, from: bytes)
+        var put = URLRequest(url: uploadURL)
+        put.httpMethod = "PUT"
+        put.addValue(mimeType, forHTTPHeaderField: "Content-Type")
+        // Use background session so large uploads can continue if the user navigates away or the app is backgrounded
+        let _ = try await BackgroundUploadManager.shared.upload(request: put, data: bytes)
         return presign.publicUrl
     }
 
@@ -1997,6 +2000,39 @@ final class SupabaseManager: ObservableObject {
         }
         let res: PostgrestResponse<[DBProfile]> = try await builder.limit(limit).execute()
         return res.value
+    }
+
+    // MARK: - Social actions (Repost)
+    func repostCount(postId: String) async throws -> Int {
+        let res: PostgrestResponse<[CountRow]> = try await client
+            .from("post_interaction")
+            .select("id")
+            .eq("post_id", value: postId)
+            .eq("type", value: "repost")
+            .execute()
+        return res.value.count
+    }
+
+    func hasReposted(postId: String) async throws -> Bool {
+        guard let me = user?.id.uuidString else { return false }
+        let res: PostgrestResponse<[CountRow]> = try await client
+            .from("post_interaction")
+            .select("id")
+            .eq("post_id", value: postId)
+            .eq("type", value: "repost")
+            .eq("user_id", value: me)
+            .limit(1)
+            .execute()
+        return !res.value.isEmpty
+    }
+
+    func addRepost(postId: String) async throws {
+        guard let me = user?.id.uuidString else { return }
+        struct Row: Encodable { let post_id: String; let user_id: String; let type: String }
+        _ = try await client
+            .from("post_interaction")
+            .insert([Row(post_id: postId, user_id: me, type: "repost")])
+            .execute()
     }
 
     // MARK: - Post details for hydration (profile viewer)

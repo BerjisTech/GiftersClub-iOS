@@ -1,6 +1,9 @@
 import SwiftUI
 import AVKit
 import UIKit
+#if canImport(Supabase)
+import Supabase
+#endif
 #if canImport(DotLottie)
 import DotLottie
 #endif
@@ -310,10 +313,14 @@ struct PostPageView: View {
     @State private var isPaused: Bool = false
     @State private var showHeart: Bool = false
     @State private var showBreak: Bool = false
+    @State private var repostCount: Int = 0
+    @State private var didRepost: Bool = false
     @State private var activeImageIndex: Int = 0
     @State private var hasAccess: Bool = true
     @State private var unlocking: Bool = false
     @ObservedObject private var supabase = SupabaseManager.shared
+    @State private var authorUserId: String? = nil
+    @State private var isFollowing: Bool = false
 
     var overlaysHidden: Bool { magnify > 1.01 || isPaused }
     private var isOwnPost: Bool { (supabase.user?.id.uuidString ?? "") == post.author.userId }
@@ -373,6 +380,12 @@ struct PostPageView: View {
         .background(Color.black)
         .onAppear {
             if let t = post.accessType, t != "free", !isOwnPost { hasAccess = false }
+            Task { await preloadFollowState() }
+            // Initialize repost count from backend and whether I already reposted
+            Task {
+                if let c = try? await supabase.repostCount(postId: post.id) { await MainActor.run { repostCount = c } }
+                if let mine = try? await supabase.hasReposted(postId: post.id) { await MainActor.run { didRepost = mine } }
+            }
         }
         .task { await checkAccess() }
     }
@@ -485,35 +498,78 @@ struct PostPageView: View {
                 }
                 .padding(.bottom, 28)
 
-                VStack(spacing: 18) {
-                    VStack(spacing: 4) {
-                        Image(systemName: post.isLiked ? "heart.fill" : "heart")
-                            .foregroundStyle(post.isLiked ? .red : .white)
-                            .font(.title2.weight(.semibold))
-                        Text("\(post.likes)").foregroundStyle(.white).font(.caption2)
+                VStack(spacing: 16) {
+                    // Avatar with a single overlay button: Follow when not following, Message when following
+                    ZStack(alignment: .bottom) {
+                        if let url = post.author.avatarURL {
+                            AsyncImage(url: url) { img in
+                                img.resizable().scaledToFill()
+                            } placeholder: { Circle().fill(Color.white.opacity(0.2)) }
+                            .frame(width: 44, height: 44)
+                            .clipShape(Circle())
+                            .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 1))
+                            .onTapGesture { openPoster() }
+                        } else {
+                            Circle().fill(Color.white.opacity(0.2)).frame(width: 44, height: 44)
+                        }
+                        if isFollowing {
+                            Button(action: { NotificationCenter.default.post(name: .openChatWithUsername, object: post.author.username) }) {
+                                Image(systemName: "paperplane.fill")
+                                    .font(.caption.weight(.bold))
+                                    .padding(6)
+                                    .background(.ultraThinMaterial, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .offset(y: 12)
+                        } else {
+                            Button(action: { Task { await followAuthor() } }) {
+                                Image(systemName: "person.badge.plus")
+                                    .font(.caption.weight(.bold))
+                                    .padding(6)
+                                    .background(.ultraThinMaterial, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .offset(y: 12)
+                        }
                     }
-                    .onTapGesture { toggleLike(showBurst: true) }
+                    VStack(spacing: 10) {
+                        VStack(spacing: 4) {
+                            Image(systemName: post.isLiked ? "heart.fill" : "heart")
+                                .foregroundStyle(post.isLiked ? .red : .white)
+                                .font(.title2.weight(.semibold))
+                            Text("\(post.likes)").foregroundStyle(.white).font(.caption2)
+                        }
+                        .onTapGesture { toggleLike(showBurst: true) }
 
-                    VStack(spacing: 4) {
-                        Image(systemName: "arrowshape.turn.up.forward.fill")
-                            .foregroundStyle(.white)
-                            .font(.title2.weight(.semibold))
-                        Text("\(post.shares)").foregroundStyle(.white).font(.caption2)
-                    }
-                    .onTapGesture { share() }
+                        VStack(spacing: 4) {
+                            Image(systemName: "message.fill")
+                                .foregroundStyle(.white)
+                                .font(.title2.weight(.semibold))
+                            Text("\(post.comments)").foregroundStyle(.white).font(.caption2)
+                        }
+                        .onTapGesture { CommentsPresenter.shared.present(postId: post.id) }
 
-                    VStack(spacing: 4) {
-                        Image(systemName: "message.fill")
-                            .foregroundStyle(.white)
-                            .font(.title2.weight(.semibold))
-                        Text("\(post.comments)").foregroundStyle(.white).font(.caption2)
+                        VStack(spacing: 4) {
+                            Image(systemName: "arrowshape.turn.up.forward.fill")
+                                .foregroundStyle(.white)
+                                .font(.title2.weight(.semibold))
+                            Text("\(post.shares)").foregroundStyle(.white).font(.caption2)
+                        }
+                        .onTapGesture { share() }
+
+                        VStack(spacing: 4) {
+                            Image(systemName: "arrow.2.squarepath")
+                                .foregroundStyle(.white)
+                                .font(.title2.weight(.semibold))
+                            Text("\(repostCount)").foregroundStyle(.white).font(.caption2)
+                        }
+                        .onTapGesture { repost() }
                     }
-                    .onTapGesture { CommentsPresenter.shared.present(postId: post.id) }
                 }
-                .padding(.trailing, 12)
+.padding(.trailing, 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .padding(.horizontal, 12)
+            .padding(.leading, 12)
             .padding(.bottom, 0)
         }
         .allowsHitTesting(true)
@@ -578,6 +634,72 @@ struct PostPageView: View {
 
     private func openPoster() {
         NotificationCenter.default.post(name: .showGifterProfile, object: post.author.username)
+    }
+
+    private func followAuthor() async {
+        // Ensure we know author id
+        if authorUserId == nil {
+            authorUserId = try? await supabase.findUserId(byUsername: post.author.username)
+        }
+        guard let id = authorUserId, let me = supabase.user?.id.uuidString, !isOwnPost else { return }
+        do {
+            struct F: Encodable { let followed_id: String; let follower_id: String }
+            _ = try await supabase.client
+                .from("follows").insert(F(followed_id: id, follower_id: me))
+                .execute()
+            await MainActor.run { isFollowing = true }
+        } catch {
+            // ignore
+        }
+    }
+
+    private func repost() {
+        Task {
+            do {
+                guard !didRepost else { return }
+                try await SupabaseManager.shared.addRepost(postId: post.id)
+                await MainActor.run { didRepost = true; repostCount += 1 }
+            } catch {
+                // swallow for now
+            }
+        }
+    }
+
+    private func preloadFollowState() async {
+        guard !isOwnPost else { return }
+        guard let me = supabase.user?.id.uuidString else { return }
+        if let id = try? await supabase.findUserId(byUsername: post.author.username) {
+            authorUserId = id
+            do {
+                let res: PostgrestResponse<[SupabaseManager.CountRow]> = try await supabase.client
+                    .from("follows").select("id")
+                    .eq("followed_id", value: id)
+                    .eq("follower_id", value: me)
+                    .limit(1)
+                    .execute()
+                await MainActor.run { isFollowing = !res.value.isEmpty }
+            } catch { }
+        }
+    }
+
+    private func toggleFollow() async {
+        guard let id = authorUserId, let me = supabase.user?.id.uuidString, !isOwnPost else { return }
+        do {
+            if isFollowing {
+                _ = try await supabase.client
+                    .from("follows").delete()
+                    .eq("followed_id", value: id)
+                    .eq("follower_id", value: me)
+                    .execute()
+                await MainActor.run { isFollowing = false }
+            } else {
+                struct F: Encodable { let followed_id: String; let follower_id: String }
+                _ = try await supabase.client
+                    .from("follows").insert(F(followed_id: id, follower_id: me))
+                    .execute()
+                await MainActor.run { isFollowing = true }
+            }
+        } catch { }
     }
 }
 

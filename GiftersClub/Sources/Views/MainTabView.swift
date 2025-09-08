@@ -18,6 +18,7 @@ struct MainTabView: View {
     @State private var deepLinkLive: LiveLink? = nil
     @ObservedObject private var supabase = SupabaseManager.shared
     @StateObject private var banners = BannerQueue()
+    @State private var pendingChatUsername: String? = nil
 
     @ObservedObject private var network = NetworkMonitor.shared
     var body: some View {
@@ -80,6 +81,19 @@ struct MainTabView: View {
             if let u = note.object as? String { profileRouteUsername = u }
             rootTab = .profile
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openChatWithUsername)) { note in
+            // Switch to Chat tab; re-post after the tab is active so ChatListView can consume it
+            rootTab = .chat
+            pendingChatUsername = note.object as? String
+        }
+        .onChange(of: rootTab, perform: { newTab in
+            if newTab == .chat, let username = pendingChatUsername {
+                pendingChatUsername = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    NotificationCenter.default.post(name: .openChatWithUsername, object: username)
+                }
+            }
+        })
         .onChange(of: rootTab, perform: { newValue in
             if newValue == .profile && programmaticSelectProfile == false {
                 NotificationCenter.default.post(name: .showCurrentProfile, object: nil)
@@ -104,6 +118,13 @@ struct MainTabView: View {
             showComposeChoice = false
             showCreatePost = false
             showGoLiveSetup = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gotoProfile)) { _ in
+            rootTab = .profile
+            // Ensure current profile is shown after switch
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                NotificationCenter.default.post(name: .showCurrentProfile, object: nil)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .hideBottomBar)) { _ in hideBottomBar = true }
         .onReceive(NotificationCenter.default.publisher(for: .showBottomBar)) { _ in hideBottomBar = false }
@@ -161,6 +182,8 @@ extension Notification.Name {
     static let goHome = Notification.Name("goHome")
     static let hideBottomBar = Notification.Name("hideBottomBar")
     static let showBottomBar = Notification.Name("showBottomBar")
+    static let openChatWithUsername = Notification.Name("openChatWithUsername")
+    static let gotoProfile = Notification.Name("gotoProfile")
 }
 
 // MARK: - Placeholder Tab Views

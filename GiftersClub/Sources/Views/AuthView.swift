@@ -14,6 +14,17 @@ struct AuthView: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
+#if targetEnvironment(simulator)
+            Button(action: simSignInWithGoogle) {
+                HStack(spacing: 8) {
+                    Image(systemName: "globe")
+                    Text("Continue with Google (sim)")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.horizontal, 24)
+#endif
             // Sign in with Apple (native)
             SignInWithAppleButton(.signIn) { request in
                 let nonce = randomNonceString()
@@ -75,3 +86,18 @@ private func sha256(_ input: String) -> String {
     let hashed = SHA256.hash(data: data)
     return hashed.compactMap { String(format: "%02x", $0) }.joined()
 }
+
+#if targetEnvironment(simulator)
+private func simSignInWithGoogle() {
+    Task {
+        do {
+            _ = try await SupabaseManager.shared.client.auth.signInWithOAuth(
+                provider: .google,
+                redirectTo: SupabaseConfig.redirectURL
+            )
+        } catch {
+            // ignore in simulator
+        }
+    }
+}
+#endif

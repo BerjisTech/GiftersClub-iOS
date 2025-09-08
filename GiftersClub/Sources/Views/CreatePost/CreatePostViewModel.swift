@@ -63,18 +63,20 @@ final class CreatePostViewModel: ObservableObject {
     func publish(onSuccess: @escaping (String) -> Void) {
         Task {
             await MainActor.run { isPosting = true; errorMessage = nil }
-            defer { Task { await MainActor.run { isPosting = false } } }
             do {
                 let postId = try await createPostRow()
-                // Upload media in order
+                // Kick off uploads in background without blocking UI
                 for (idx, m) in media.enumerated() {
-                    let filename = "\(postId)-\(Int(Date().timeIntervalSince1970))-\(idx).\(fileExtension(for: m.mime))"
-                    let publicUrl = try await SupabaseManager.shared.uploadMedia(bytes: m.data, fileName: filename, mimeType: m.mime, bucket: "post")
-                    _ = try await SupabaseManager.shared.insertPostMedia(postId: postId, mediaType: m.kind == .video ? "video" : "photo", url: publicUrl, order: idx)
+                    Task.detached {
+                        let filename = "\(postId)-\(Int(Date().timeIntervalSince1970))-\(idx).\(self.fileExtension(for: m.mime))"
+                        if let publicUrl = try? await SupabaseManager.shared.uploadMedia(bytes: m.data, fileName: filename, mimeType: m.mime, bucket: "post") {
+                            _ = try? await SupabaseManager.shared.insertPostMedia(postId: postId, mediaType: m.kind == .video ? "video" : "photo", url: publicUrl, order: idx)
+                        }
+                    }
                 }
-                await MainActor.run { onSuccess(postId) }
+                await MainActor.run { onSuccess(postId); isPosting = false }
             } catch {
-                await MainActor.run { self.errorMessage = "Failed to create post" }
+                await MainActor.run { self.errorMessage = "Failed to create post"; isPosting = false }
             }
         }
     }
