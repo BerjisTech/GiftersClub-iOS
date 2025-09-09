@@ -17,12 +17,20 @@ final class StoreKitService: ObservableObject {
         var packName: String { displayName ?? id }
     }
 
-    // Single consumable product that grants 100 tokens.
-    // Ensure App Store Connect product ID matches `token_100`.
+    // Consumable token packs (product IDs must exist in App Store Connect)
+    // Exclude items with Missing Metadata to avoid confusing the UI until ready.
     @Published var packs: [TokenPack] = [
-        .init(id: "token_100", tokens: 100)
+        .init(id: "token_100", tokens: 100),
+        .init(id: "token_500", tokens: 500),
+        .init(id: "token_2000", tokens: 2_000),
+        .init(id: "token_5000", tokens: 5_000),
+        .init(id: "token_10000", tokens: 10_000),
+        .init(id: "token_25000", tokens: 25_000),
+        .init(id: "token_50000", tokens: 50_000),
+        .init(id: "token_90000", tokens: 90_000)
     ]
     @Published var isLoading = false
+    @Published var bestValuePackId: String? = nil
 
     func refreshProducts() async {
         isLoading = true
@@ -32,7 +40,7 @@ final class StoreKitService: ObservableObject {
             let products = try await Product.products(for: ids)
             var map: [String: Product] = [:]
             products.forEach { map[$0.id] = $0 }
-            packs = packs.map { p in
+            var newPacks = packs.map { p in
                 if let prod = map[p.id] {
                     var np = p
                     np.product = prod
@@ -42,6 +50,11 @@ final class StoreKitService: ObservableObject {
                 }
                 return p
             }
+            // Keep ascending by token amount for nicer UI ordering
+            newPacks.sort { $0.tokens < $1.tokens }
+            packs = newPacks
+            // Choose best value as the largest token pack (common pricing practice)
+            bestValuePackId = newPacks.max(by: { $0.tokens < $1.tokens })?.id
         } catch {
             // Keep existing packs; UI can still show token counts
         }

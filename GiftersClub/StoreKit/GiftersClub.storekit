@@ -2,20 +2,22 @@
   "identifier": "club.gifters.storekit",
   "version": 1,
   "products": [
-    {
-      "id": "token_100",
-      "type": "consumable",
-      "displayName": "100 Tokens",
-      "price": 0.99,
-      "familyShareable": false,
-      "localizations": [
-        {
-          "locale": "en_US",
-          "displayName": "100 Tokens",
-          "description": "Buy 100 tokens"
-        }
-      ]
-    }
+    { "id": "token_100",   "type": "consumable", "displayName": "100 Tokens",    "price": 1.99,  "familyShareable": false,
+      "localizations": [{ "locale": "en_US", "displayName": "100 Tokens",    "description": "Buy 100 tokens" }] },
+    { "id": "token_500",   "type": "consumable", "displayName": "500 Tokens",    "price": 7.99,  "familyShareable": false,
+      "localizations": [{ "locale": "en_US", "displayName": "500 Tokens",    "description": "Buy 500 tokens" }] },
+    { "id": "token_2000",  "type": "consumable", "displayName": "2,000 Tokens",  "price": 24.99, "familyShareable": false,
+      "localizations": [{ "locale": "en_US", "displayName": "2,000 Tokens",  "description": "Buy 2,000 tokens" }] },
+    { "id": "token_5000",  "type": "consumable", "displayName": "5,000 Tokens",  "price": 49.99, "familyShareable": false,
+      "localizations": [{ "locale": "en_US", "displayName": "5,000 Tokens",  "description": "Buy 5,000 tokens" }] },
+    { "id": "token_10000", "type": "consumable", "displayName": "10,000 Tokens", "price": 99.99, "familyShareable": false,
+      "localizations": [{ "locale": "en_US", "displayName": "10,000 Tokens", "description": "Buy 10,000 tokens" }] },
+    { "id": "token_25000", "type": "consumable", "displayName": "25,000 Tokens", "price": 249.99, "familyShareable": false,
+      "localizations": [{ "locale": "en_US", "displayName": "25,000 Tokens", "description": "Buy 25,000 tokens" }] },
+    { "id": "token_50000", "type": "consumable", "displayName": "50,000 Tokens", "price": 499.99, "familyShareable": false,
+      "localizations": [{ "locale": "en_US", "displayName": "50,000 Tokens", "description": "Buy 50,000 tokens" }] },
+    { "id": "token_90000", "type": "consumable", "displayName": "90,000 Tokens", "price": 999.99, "familyShareable": false,
+      "localizations": [{ "locale": "en_US", "displayName": "90,000 Tokens", "description": "Buy 90,000 tokens" }] }
   ],
   "settings": {
     "country": "US",

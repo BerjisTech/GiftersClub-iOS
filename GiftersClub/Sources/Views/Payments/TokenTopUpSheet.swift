@@ -23,18 +23,14 @@ struct TokenTopUpSheet: View {
                 Text("Prices include platform fees").font(.caption).foregroundStyle(.secondary)
                 if sk.isLoading { ProgressView().progressViewStyle(.circular) }
                 VStack(spacing: 8) {
-                    ForEach(sk.packs) { pack in
+                    ForEach(sk.packs.filter { $0.product != nil }) { pack in
                         Button(action: { Task { await buy(pack) } }) {
                             HStack {
                                 VStack(alignment: .leading) {
                                     HStack(spacing: 8) {
                                         Text("\(pack.tokens) tokens").font(.subheadline.weight(.semibold))
-                                        if isRecommended(pack: pack) {
-                                            Text("Recommended")
-                                                .font(.caption2.weight(.bold))
-                                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.15)))
-                                        }
+                                        if isRecommended(pack: pack) { badge("Recommended") }
+                                        else if isBestValue(pack: pack) { badge("Best value") }
                                     }
                                     if let name = pack.displayName { Text(name).font(.caption).foregroundStyle(.secondary) }
                                     if let need = neededTokens {
@@ -87,6 +83,18 @@ struct TokenTopUpSheet: View {
         let covering = sk.packs.filter { $0.tokens >= need }.sorted { $0.tokens < $1.tokens }
         if let first = covering.first { return first.id == pack.id }
         return false
+    }
+
+    private func isBestValue(pack: StoreKitService.TokenPack) -> Bool {
+        return sk.bestValuePackId == pack.id
+    }
+
+    private func badge(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.15)))
     }
 
     init(initialAmount: Int? = nil, onCompleted: ((Bool) -> Void)? = nil) {
