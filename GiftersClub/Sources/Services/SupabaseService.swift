@@ -259,8 +259,48 @@ final class SupabaseManager: ObservableObject {
     }
 
     // MARK: - Access gating (subscriptions and pay-per-post)
+    // Lightweight in-memory caches for the current session
+    private var accessCachePosts = Set<String>()
+    private var subscriptionCacheCreators = Set<String>()
+    private let accessQueue = DispatchQueue(label: "access-cache-queue")
+
+    /// Prefetch access/ subscription state for visible items to avoid N+1 checks.
+    func prefetchAccess(posts: [String], creators: [String]) async {
+        let me = user?.id.uuidString
+        guard let me, (!posts.isEmpty || !creators.isEmpty) else { return }
+        let missingPosts: [String] = accessQueue.sync { posts.filter { !accessCachePosts.contains($0) } }
+        let missingCreators: [String] = accessQueue.sync { creators.filter { !subscriptionCacheCreators.contains($0) } }
+        do {
+            if !missingPosts.isEmpty {
+                struct Row: Decodable { let post_id: String }
+                let res: PostgrestResponse<[Row]> = try await client
+                    .from("post_access").select("post_id")
+                    .eq("user_id", value: me)
+                    .in("post_id", values: missingPosts)
+                    .execute()
+                let ids = Set(res.value.map { $0.post_id })
+                accessQueue.sync { accessCachePosts.formUnion(ids) }
+            }
+        } catch { }
+        do {
+            if !missingCreators.isEmpty {
+                let now = ISO8601DateFormatter().string(from: Date())
+                struct Row: Decodable { let creator_id: String }
+                let res: PostgrestResponse<[Row]> = try await client
+                    .from("subscriptions").select("creator_id")
+                    .eq("subscriber_id", value: me)
+                    .or("end_date.is.null,end_date.gt.\(now)")
+                    .in("creator_id", values: missingCreators)
+                    .execute()
+                let ids = Set(res.value.map { $0.creator_id })
+                accessQueue.sync { subscriptionCacheCreators.formUnion(ids) }
+            }
+        } catch { }
+    }
     func hasSubscription(to creatorId: String) async throws -> Bool {
         guard let me = user?.id.uuidString else { return false }
+        // Cache check
+        if accessQueue.sync(execute: { subscriptionCacheCreators.contains(creatorId) }) { return true }
         // Active subscription: end_date is null or in the future
         let now = ISO8601DateFormatter().string(from: Date())
         struct Row: Decodable { let id: String }
@@ -272,11 +312,14 @@ final class SupabaseManager: ObservableObject {
             .or("end_date.is.null,end_date.gt.\(now)")
             .limit(1)
             .execute()
-        return !res.value.isEmpty
+        let ok = !res.value.isEmpty
+        if ok { accessQueue.sync { subscriptionCacheCreators.insert(creatorId) } }
+        return ok
     }
 
     func hasPostAccess(postId: String) async throws -> Bool {
         guard let me = user?.id.uuidString else { return false }
+        if accessQueue.sync(execute: { accessCachePosts.contains(postId) }) { return true }
         struct Row: Decodable { let id: String }
         let res: PostgrestResponse<[Row]> = try await client
             .from("post_access")
@@ -285,7 +328,9 @@ final class SupabaseManager: ObservableObject {
             .eq("user_id", value: me)
             .limit(1)
             .execute()
-        return !res.value.isEmpty
+        let ok = !res.value.isEmpty
+        if ok { accessQueue.sync { accessCachePosts.insert(postId) } }
+        return ok
     }
 
     enum SubscriptionDuration: String { case one_time, monthly, annual }
@@ -313,6 +358,8 @@ final class SupabaseManager: ObservableObject {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
             throw NSError(domain: "Subscribe", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg ?? "Subscription failed"])
         }
+        // Optimistically mark creator as subscribed in cache
+        accessQueue.sync { subscriptionCacheCreators.insert(creatorId) }
     }
 
     func purchasePostAccess(postId: String, tokens: Int) async throws {
@@ -338,6 +385,8 @@ final class SupabaseManager: ObservableObject {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
             throw NSError(domain: "Purchase", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg ?? "Purchase failed"])
         }
+        // Optimistically mark post as accessible
+        accessQueue.sync { accessCachePosts.insert(postId) }
     }
 
     // MARK: - Subscription Plans (CRUD)

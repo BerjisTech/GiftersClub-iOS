@@ -133,6 +133,10 @@ struct HomeView: View {
                 selection = 0
                 offset = mapped.count
             }
+            // Prefetch access/subscriptions for visible items
+            let postIds = mapped.map { $0.id }
+            let creators = Array(Set(mapped.map { $0.author.userId }))
+            await supabase.prefetchAccess(posts: postIds, creators: creators)
         } catch {
             // Keep old posts on failure
         }
@@ -157,6 +161,10 @@ struct HomeView: View {
                 items.append(contentsOf: newItems)
                 offset += mapped.count
             }
+            // Prefetch for the newly loaded posts
+            let postIds = mapped.map { $0.id }
+            let creators = Array(Set(mapped.map { $0.author.userId }))
+            await supabase.prefetchAccess(posts: postIds, creators: creators)
         } catch {
             // ignore
         }
@@ -433,9 +441,7 @@ struct PostPageView: View {
             if type == "paid" {
                 hasAccess = try await supabase.hasPostAccess(postId: post.id)
             } else if type == "subscription" {
-                if let id = try? await supabase.findUserId(byUsername: post.author.username) {
-                    hasAccess = try await supabase.hasSubscription(to: id)
-                } else { hasAccess = false }
+                hasAccess = try await supabase.hasSubscription(to: post.author.userId)
             }
         } catch { hasAccess = false }
     }
@@ -638,9 +644,7 @@ struct PostPageView: View {
 
     private func followAuthor() async {
         // Ensure we know author id
-        if authorUserId == nil {
-            authorUserId = try? await supabase.findUserId(byUsername: post.author.username)
-        }
+        authorUserId = post.author.userId
         guard let id = authorUserId, let me = supabase.user?.id.uuidString, !isOwnPost else { return }
         do {
             struct F: Encodable { let followed_id: String; let follower_id: String }
@@ -668,8 +672,9 @@ struct PostPageView: View {
     private func preloadFollowState() async {
         guard !isOwnPost else { return }
         guard let me = supabase.user?.id.uuidString else { return }
-        if let id = try? await supabase.findUserId(byUsername: post.author.username) {
-            authorUserId = id
+        do {
+            authorUserId = post.author.userId
+            let id = post.author.userId
             do {
                 let res: PostgrestResponse<[SupabaseManager.CountRow]> = try await supabase.client
                     .from("follows").select("id")

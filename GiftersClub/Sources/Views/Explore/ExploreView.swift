@@ -526,6 +526,13 @@ private struct ExploreUnifiedFeed: View {
             .padding(.top, 8)
         }
         .task { await loadLives() }
+        .task {
+            // Prefetch access and subscriptions for visible items to avoid N+1 checks
+            let postIds = posts.map { $0.id }
+            var creatorIds = Set(posts.map { $0.user_id })
+            for u in users { creatorIds.insert(u.user_id) }
+            await supabase.prefetchAccess(posts: postIds, creators: Array(creatorIds))
+        }
     }
 
     private func buildItems() -> [Item] {
