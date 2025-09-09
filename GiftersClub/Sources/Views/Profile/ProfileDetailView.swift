@@ -710,6 +710,7 @@ private struct GiftsCatalogView: View {
         }
         .padding(.vertical, 8)
         .task { await load() }
+        .onChange(of: sort) { _ in Task { await load() } }
         .sheet(item: $selectedGift) { wrap in
             GiftSendSheet(gift: wrap.gift, presetRecipientId: presetRecipientId)
                 .presentationDetents([.fraction(0.5), .fraction(0.75)])

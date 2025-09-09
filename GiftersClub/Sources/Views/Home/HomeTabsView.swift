@@ -138,9 +138,23 @@ extension HomeTabsView {
 struct GiftsHomeView: View {
     struct GiftWrapper: Identifiable { let id: String; let gift: SupabaseManager.DBGift }
     @State private var selectedGift: GiftWrapper? = nil
+    @State private var sort: GiftsGridView.Sort = .newest
     var body: some View {
-        GiftsGridView(sort: .newest) { gift in
-            selectedGift = GiftWrapper(id: gift.id, gift: gift)
+        VStack(spacing: 8) {
+            HStack {
+                Menu {
+                    Button("Newest") { sort = .newest }
+                    Button("Popular") { sort = .popular }
+                    Button("Price ↑") { sort = .priceAsc }
+                    Button("Price ↓") { sort = .priceDesc }
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                }
+                Spacer()
+            }
+            GiftsGridView(sort: sort) { gift in
+                selectedGift = GiftWrapper(id: gift.id, gift: gift)
+            }
         }
             .padding(.horizontal)
             .padding(.top, 8)
@@ -186,6 +200,7 @@ private struct GiftsGridView: View {
             .padding(.vertical, 8)
         }
         .task { await load() }
+        .onChange(of: sort) { _ in Task { await load() } }
         .refreshable { await load() }
     }
     private func load() async {
