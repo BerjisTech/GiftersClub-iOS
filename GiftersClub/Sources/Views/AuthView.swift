@@ -61,7 +61,13 @@ struct AuthView: View {
             Spacer()
         }
     }
-
+    private func signInGoogle() {
+        isLoadingGoogle = true
+        Task {
+            await SupabaseManager.shared.signInWithGoogle()
+            isLoadingGoogle = false
+        }
+    }
 }
 
 struct AuthView_Previews: PreviewProvider {
@@ -98,10 +104,3 @@ private func sha256(_ input: String) -> String {
     return hashed.compactMap { String(format: "%02x", $0) }.joined()
 }
 
-private func signInGoogle() {
-    isLoadingGoogle = true
-    Task {
-        await SupabaseManager.shared.signInWithGoogle()
-        isLoadingGoogle = false
-    }
-}

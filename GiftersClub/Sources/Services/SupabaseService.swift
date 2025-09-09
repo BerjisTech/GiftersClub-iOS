@@ -102,19 +102,22 @@ final class SupabaseManager: ObservableObject {
             let existing: PostgrestResponse<[DBProfile]> = try await client
                 .from("profiles")
                 .select()
-                .eq("user_id", value: user.id)
+                .eq("user_id", value: user.id.uuidString)
                 .limit(1)
                 .execute()
             if existing.value.isEmpty {
                 let email = user.email ?? ""
+                struct NewProfile: Encodable { let user_id: String; let email: String }
                 _ = try await client
                     .from("profiles")
-                    .insert([["user_id": user.id, "email": email]])
+                    .insert([NewProfile(user_id: user.id.uuidString, email: email)])
                     .execute()
             }
-        } catch { #if DEBUG
+        } catch {
+            #if DEBUG
             print("ensureProfile error: \(error)")
-        #endif }
+            #endif
+        }
     }
 
     // Evaluate if we must force a username prompt (relay emails or missing username)

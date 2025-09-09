@@ -7,22 +7,8 @@ enum SupabaseConfig {
     static let redirectURL = URL(string: "gifterclub://login-callback")!
     // Base URL for web app where static assets (like gifts images) are hosted
     static let webBase = URL(string: "https://gifters.club")!
-    // Hosted payment path for web-based Flutterwave checkout (backend-defined)
-    static let paymentTopUpPath = "pay/topup"
-    // URL scheme/host used by the app to receive web checkout callbacks
-    // e.g., gifterclub://payment-callback?success=1&tx_ref=...
-    static let paymentCallbackHost = "payment-callback"
-    // Supabase Edge Function to initialize a token top-up session (returns checkout URL)
-    // Update to match your functions repo (Angular/Kotlin parity)
-    static let paymentTopUpFunctionName = "purchase-tokens-init"
     // Supabase Edge Function to validate IAP and credit tokens
     static let iapPurchaseFunctionName = "purchase-tokens-iap"
-    // Flutterwave public key from Angular/Kotlin
-    #if DEBUG
-    static let flutterwavePublicKey = "FLWPUBK_TEST-d9ddd8396154af47423b8e55dc5c1f69-X"
-    #else
-    static let flutterwavePublicKey = "FLWPUBK-23f4ab7e7dfd648de9c957acd063b30d-X"
-    #endif
 
     // LiveKit server URL used by the iOS client to connect to the room created by the Edge Function token
     // Example (LiveKit Cloud): wss://yourdomain.livekit.cloud

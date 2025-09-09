@@ -4,7 +4,7 @@ SwiftUI iOS app that mirrors the Android `GiftersClub` and the Angular `gifter-c
 
 ## Overview
 
-- Native Sign in with Apple for sign-in (via Supabase Auth).
+- Sign in with Apple and Google (via Supabase Auth).
 - Root router that shows `AuthView` when signed out, `MainTabView` when signed in.
 - Deep links:
   - `gifterclub://login-callback` (OAuth return)
@@ -44,7 +44,7 @@ SwiftUI iOS app that mirrors the Android `GiftersClub` and the Angular `gifter-c
 
 7) Build and Run
 
-   - Launch the app. Tap “Sign in with Apple” and complete sign-in.
+   - Launch the app. Tap “Sign in with Apple” or “Continue with Google” and complete sign-in.
    - On success, the app shows `MainTabView` with tabs (Home, Explore, Chat, Wishlists, Profile).
 
 ## Notes
