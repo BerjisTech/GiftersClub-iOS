@@ -313,7 +313,7 @@ final class SupabaseManager: ObservableObject {
             .limit(1)
             .execute()
         let ok = !res.value.isEmpty
-        if ok { accessQueue.sync { subscriptionCacheCreators.insert(creatorId) } }
+        if ok { _ = accessQueue.sync { subscriptionCacheCreators.insert(creatorId); return () } }
         return ok
     }
 
@@ -329,7 +329,7 @@ final class SupabaseManager: ObservableObject {
             .limit(1)
             .execute()
         let ok = !res.value.isEmpty
-        if ok { accessQueue.sync { accessCachePosts.insert(postId) } }
+        if ok { _ = accessQueue.sync { accessCachePosts.insert(postId); return () } }
         return ok
     }
 
@@ -359,7 +359,7 @@ final class SupabaseManager: ObservableObject {
             throw NSError(domain: "Subscribe", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg ?? "Subscription failed"])
         }
         // Optimistically mark creator as subscribed in cache
-        accessQueue.sync { subscriptionCacheCreators.insert(creatorId) }
+        _ = accessQueue.sync { subscriptionCacheCreators.insert(creatorId); return () }
     }
 
     func purchasePostAccess(postId: String, tokens: Int) async throws {
@@ -386,7 +386,7 @@ final class SupabaseManager: ObservableObject {
             throw NSError(domain: "Purchase", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg ?? "Purchase failed"])
         }
         // Optimistically mark post as accessible
-        accessQueue.sync { accessCachePosts.insert(postId) }
+        _ = accessQueue.sync { accessCachePosts.insert(postId); return () }
     }
 
     // MARK: - Subscription Plans (CRUD)
