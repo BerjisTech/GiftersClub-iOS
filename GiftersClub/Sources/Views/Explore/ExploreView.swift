@@ -59,8 +59,8 @@ struct ExploreView: View {
                 ))
             }
             .navigationDestinationCompat(item: $selectedUser) { user in
-                // Avoid nested stacks: push the profile detail directly
-                ProfileDetailView(username: user.username)
+                // Use wrapper that provides required environment objects (banners, drawer)
+                GifterProfileView(username: user.username)
             }
             .task { await loadSuggestions() }
             .onAppear { consumeExternalQueryIfNeeded() }
