@@ -3,6 +3,7 @@ import AVFoundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import PhotosUI
+import UIKit
 
 final class CameraController: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate {
     enum Mode { case photo, video }
@@ -116,6 +117,11 @@ final class CameraController: NSObject, ObservableObject, AVCaptureFileOutputRec
         self.captureCompletion = completion
         let work = { [weak self] in
             guard let self else { return }
+            // Align orientation and mirroring for photo capture
+            if let conn = self.photoOutput.connection(with: .video) {
+                conn.videoOrientation = AVCaptureVideoOrientation.currentInterfaceOrientation
+                conn.isVideoMirrored = (self.currentPosition == .front)
+            }
             let settings = AVCapturePhotoSettings()
             settings.flashMode = self.flashOn ? .on : .off
             self.photoOutput.capturePhoto(with: settings, delegate: self)
@@ -127,6 +133,10 @@ final class CameraController: NSObject, ObservableObject, AVCaptureFileOutputRec
         guard session.isRunning, !movieOutput.isRecording else { return }
         self.captureCompletion = completion
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString + ".mp4")
+        if let conn = movieOutput.connection(with: .video) {
+            conn.videoOrientation = AVCaptureVideoOrientation.currentInterfaceOrientation
+            conn.isVideoMirrored = (currentPosition == .front)
+        }
         if let max = maxDuration { movieOutput.maxRecordedDuration = CMTime(seconds: max, preferredTimescale: 1) }
         movieOutput.startRecording(to: tmp, recordingDelegate: self)
         DispatchQueue.main.async { self.isRecording = true }
@@ -191,6 +201,8 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var image = CIImage(cvImageBuffer: buffer)
+        // Mirror front camera for preview to feel natural
+        if currentPosition == .front { image = image.oriented(.upMirrored) }
         if currentFilter != .none {
             switch currentFilter {
             case .none: break
@@ -223,7 +235,13 @@ struct CameraPreview: UIViewRepresentable {
             self.layer.addSublayer(layerView)
         }
         required init?(coder: NSCoder) { fatalError() }
-        override func layoutSubviews() { super.layoutSubviews(); layerView.frame = bounds }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            layerView.frame = bounds
+            if let conn = layerView.connection, conn.isVideoOrientationSupported {
+                conn.videoOrientation = AVCaptureVideoOrientation.currentInterfaceOrientation
+            }
+        }
     }
 }
 
@@ -253,6 +271,11 @@ struct CreatePostCameraView: View {
             }
             .ignoresSafeArea()
             .gesture(magnification)
+
+            // Top gradient for legibility on real devices
+            LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .center)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
             // Unavailable camera (Simulator/permissions denied) helper overlay
             if !camera.isAvailable {
@@ -308,30 +331,21 @@ struct CreatePostCameraView: View {
                 }
                 Spacer()
             }
+            .zIndex(1)
 
             // Bottom overlay with two rows
             VStack(spacing: 10) {
                 Spacer()
-                VStack(spacing: 10) {
-                    HStack {
-                        // Zoom presets
-                        HStack(spacing: 10) {
-                            zoomItem("1x", 1)
-                            zoomItem("2x", 2)
-                            zoomItem("4x", 4)
-                            zoomItem("8x", 8)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        Divider().frame(height: 20)
-                        // Timer presets 5, 15, 60s, 10m
-                        HStack(spacing: 10) {
-                            timerItem("5s", 5)
-                            timerItem("15s", 15)
-                            timerItem("60s", 60)
-                            timerItem("10m", 600)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                VStack(spacing: 12) {
+                    // Timer presets (centered)
+                    HStack(spacing: 10) {
+                        timerItem("5s", 5)
+                        timerItem("15s", 15)
+                        timerItem("60s", 60)
+                        timerItem("10m", 600)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal)
 
                     HStack(alignment: .center) {
                         // Filters scroller (left)
@@ -394,10 +408,13 @@ struct CreatePostCameraView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .background(
+                    LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea()
+                )
                 .padding(.horizontal)
-                .padding(.bottom, 12)
+                .padding(.bottom, 8)
+                .zIndex(1)
             }
         }
         .onAppear {
@@ -484,17 +501,6 @@ struct CreatePostCameraView: View {
         }
     }
 
-    private func zoomItem(_ label: String, _ factor: CGFloat) -> some View {
-        Text(label)
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(camera.zoomFactor.rounded() == factor ? Color.white.opacity(0.25) : Color.white.opacity(0.12))
-            .clipShape(Capsule())
-            .onTapGesture { camera.setZoom(factor) }
-    }
-
     private func timerItem(_ label: String, _ seconds: TimeInterval) -> some View {
         Text(label)
             .font(.caption.weight(.bold))
@@ -540,5 +546,20 @@ private struct TimerPickerSheet: View {
         if s < 60 { return "\(s)s" }
         let m = s/60
         return "\(m)m"
+    }
+}
+// Helper to map device/interface orientation to AVCaptureVideoOrientation
+extension AVCaptureVideoOrientation {
+    static var currentInterfaceOrientation: AVCaptureVideoOrientation {
+        let orientation: UIInterfaceOrientation = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.interfaceOrientation }
+            .first ?? .portrait
+        switch orientation {
+        case .portrait: return .portrait
+        case .portraitUpsideDown: return .portraitUpsideDown
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        default: return .portrait
+        }
     }
 }

@@ -30,7 +30,8 @@ struct GoLiveSetupView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
+            ScrollView {
+                VStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Go Live")
                         .font(.largeTitle.bold())
@@ -116,6 +117,9 @@ struct GoLiveSetupView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: { Image(systemName: "xmark").font(.headline) }
                 }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 20)
             }
             .alert("Oops", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
                 Button("OK", role: .cancel) {}

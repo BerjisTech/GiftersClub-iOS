@@ -28,7 +28,7 @@ extension View {
         self.navigationDestination(item: item, destination: destination)
     }
 
-    // iOS 16: fall back to sheet(item:)
+    // iOS 16 and below: fall back to sheet(item:)
     @ViewBuilder
     func navigationDestinationCompat<Item: Identifiable, Destination: View>(item: Binding<Item?>, @ViewBuilder destination: @escaping (Item) -> Destination) -> some View {
         self.sheet(item: item, content: destination)

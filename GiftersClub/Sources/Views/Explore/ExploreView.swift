@@ -151,11 +151,10 @@ private struct SearchBarHeightKey: PreferenceKey {
             if let r = results {
                 switch activeTab {
                 case .top:
-                    VStack(spacing: 10) {
-                        // Live row at top when available
-                        ExploreLiveRow()
-                        ExploreTopGrid(posts: r.top, users: r.users) { p in selectedPost = p } onSelectUser: { u in selectedUser = u }
-                    }
+                    // Unified interstitial feed: posts (2-up), users (full-width), and lives mixed in
+                    ExploreUnifiedFeed(query: query, posts: r.top, users: r.users,
+                                        onSelectPost: { p in selectedPost = p },
+                                        onSelectUser: { u in selectedUser = u })
                 case .photos:
                     ExplorePostsGrid(posts: r.photos) { p in selectedPost = p }
                 case .videos:
@@ -437,6 +436,133 @@ private struct ExploreUsersList: View {
             }
             .padding(.top, 8)
         }
+    }
+}
+
+// MARK: - Unified interleaved feed (Top tab)
+private struct ExploreUnifiedFeed: View {
+    let query: String
+    let posts: [SupabaseManager.ExplorePost]
+    let users: [SupabaseManager.ExploreUser]
+    var onSelectPost: (SupabaseManager.ExplorePost) -> Void = { _ in }
+    var onSelectUser: (SupabaseManager.ExploreUser) -> Void = { _ in }
+    @State private var lives: [SupabaseManager.DBLiveStreamWithStats] = []
+    private let supabase = SupabaseManager.shared
+
+    enum Item: Identifiable {
+        case posts([SupabaseManager.ExplorePost])
+        case user(SupabaseManager.ExploreUser)
+        case live(SupabaseManager.DBLiveStreamWithStats)
+        var id: String {
+            switch self {
+            case .posts(let ps): return "posts:" + ps.map { $0.id }.joined(separator: ",")
+            case .user(let u): return "user:" + u.user_id
+            case .live(let l): return "live:" + l.id
+            }
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(buildItems()) { item in
+                    switch item {
+                    case .posts(let pair):
+                        HStack(spacing: 10) {
+                            if let first = pair.first {
+                                let media: LockablePostCard.MediaKind? = first.media?.first.flatMap { m in
+                                    guard let u = m.url, let url = URL(string: u) else { return nil }
+                                    return (m.media_type == "video") ? .video(url) : .image(url)
+                                }
+                                LockablePostCard(
+                                    postId: first.id,
+                                    authorUserId: first.user_id,
+                                    accessType: first.access_type,
+                                    price: first.price,
+                                    media: media,
+                                    isLong: false,
+                                    onTapUnlocked: { onSelectPost(first) }
+                                )
+                            }
+                            if pair.count > 1, let second = pair.dropFirst().first {
+                                let media2: LockablePostCard.MediaKind? = second.media?.first.flatMap { m in
+                                    guard let u = m.url, let url = URL(string: u) else { return nil }
+                                    return (m.media_type == "video") ? .video(url) : .image(url)
+                                }
+                                LockablePostCard(
+                                    postId: second.id,
+                                    authorUserId: second.user_id,
+                                    accessType: second.access_type,
+                                    price: second.price,
+                                    media: media2,
+                                    isLong: false,
+                                    onTapUnlocked: { onSelectPost(second) }
+                                )
+                            } else {
+                                Color.clear.frame(height: 200)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                    case .user(let u):
+                        ExploreUserPill(user: u)
+                            .padding(.horizontal)
+                            .contentShape(Rectangle())
+                            .onTapGesture { onSelectUser(u) }
+                        Divider().padding(.horizontal)
+                    case .live(let l):
+                        // Use the same live card as Home feed for visual parity
+                        NavigationLink(destination: LiveEntryDestination(live: l)) {
+                            LiveCardView(live: l)
+                                .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .simultaneousGesture(TapGesture().onEnded { NotificationCenter.default.post(name: .hideBottomBar, object: nil) })
+                        .padding(.horizontal)
+                    }
+                }
+            }
+            .padding(.top, 8)
+        }
+        .task { await loadLives() }
+    }
+
+    private func buildItems() -> [Item] {
+        // Pair posts two per row
+        let pairs: [[SupabaseManager.ExplorePost]] = stride(from: 0, to: posts.count, by: 2).map { i in
+            var arr: [SupabaseManager.ExplorePost] = []
+            arr.append(posts[i])
+            if i + 1 < posts.count { arr.append(posts[i+1]) }
+            return arr
+        }
+        var out: [Item] = []
+        var uIndex = 0
+        var lIndex = 0
+        var sinceUser = 0
+        var sinceLive = 0
+        for pair in pairs {
+            out.append(.posts(pair))
+            sinceUser += 1
+            sinceLive += 1
+            // Inject a user pill every 2 post rows
+            if sinceUser >= 2, uIndex < users.count {
+                out.append(.user(users[uIndex])); uIndex += 1; sinceUser = 0
+            }
+            // Inject a live card every 3 post rows
+            if sinceLive >= 3, lIndex < lives.count {
+                out.append(.live(lives[lIndex])); lIndex += 1; sinceLive = 0
+            }
+        }
+        // If no post rows but have users, still show the first user as a hint
+        if pairs.isEmpty, let firstUser = users.first { out.append(.user(firstUser)) }
+        return out
+    }
+
+    private func loadLives() async {
+        let limit = max(1, posts.count / 3)
+        let r = try? await supabase.fetchFeedLiveStreams(limit: limit, query: query.isEmpty ? nil : query)
+        await MainActor.run { lives = r ?? [] }
     }
 }
 
