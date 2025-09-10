@@ -929,11 +929,13 @@ struct CreatePostSheet: View {
             }
              func drawOverlays(on image: UIImage, mediaId: UUID) -> UIImage {
                 let scale = image.scale
-                UIGraphicsBeginImageContextWithOptions(image.size, false, scale)
+                // Use opaque=true to avoid introducing an alpha channel for opaque bases (saves memory, removes console warnings)
+                UIGraphicsBeginImageContextWithOptions(image.size, true, scale)
                 image.draw(in: CGRect(origin: .zero, size: image.size))
                 if let arr = captions[mediaId] {
                     for cap in arr {
-                        let font = UIFont(name: cap.fontName, size: max(8, cap.fontSize * cap.scale)) ?? UIFont.systemFont(ofSize: max(8, cap.fontSize * cap.scale), weight: .semibold)
+                        // Use base font size and scale via context to avoid double-scaling issues
+                        let font = UIFont(name: cap.fontName, size: max(8, cap.fontSize)) ?? UIFont.systemFont(ofSize: max(8, cap.fontSize), weight: .semibold)
                         let para = NSMutableParagraphStyle(); para.alignment = cap.alignment
                         var attrs: [NSAttributedString.Key: Any] = [
                             .font: font,
@@ -945,20 +947,20 @@ struct CreatePostSheet: View {
                             attrs[.strokeWidth] = -3.0
                         }
                         let text = NSString(string: cap.text)
-                        // Measure line using bounding rect to support alignment and multi-line in future
                         let maxW: CGFloat = image.size.width * 0.9
                         let bounding = text.boundingRect(with: CGSize(width: maxW, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil).integral
                         let size = bounding.size
                         let center = cap.center
                         let rect = CGRect(x: center.x - size.width/2, y: center.y - size.height/2, width: size.width, height: size.height)
-                        let ctx = UIGraphicsGetCurrentContext()
-                        ctx?.saveGState()
-                        ctx?.translateBy(x: center.x, y: center.y)
-                        ctx?.rotate(by: CGFloat(cap.rotation.radians))
-                        ctx?.scaleBy(x: cap.scale, y: cap.scale)
-                        ctx?.translateBy(x: -center.x, y: -center.y)
-                        text.draw(in: rect, withAttributes: attrs)
-                        ctx?.restoreGState()
+                        if let ctx = UIGraphicsGetCurrentContext() {
+                            ctx.saveGState()
+                            ctx.translateBy(x: center.x, y: center.y)
+                            ctx.rotate(by: CGFloat(cap.rotation.radians))
+                            ctx.scaleBy(x: cap.scale, y: cap.scale)
+                            ctx.translateBy(x: -center.x, y: -center.y)
+                            text.draw(in: rect, withAttributes: attrs)
+                            ctx.restoreGState()
+                        }
                     }
                 }
                 if let sts = stickers[mediaId] {
