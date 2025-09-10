@@ -617,6 +617,7 @@ struct CreatePostSheet: View {
         struct Sticker: Identifiable, Equatable {
             let id: UUID
             var imageName: String
+            var imageData: Data? = nil
             var center: CGPoint
             var scale: CGFloat
             var rotation: Angle
@@ -638,163 +639,168 @@ struct CreatePostSheet: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 VStack(spacing: 0) {
-                    HStack {
-                        Button(action: onBack) { Image(systemName: "chevron.left").font(.title2.weight(.semibold)) }
-                        Spacer()
-                        Text("Edit").font(.headline)
-                        Spacer()
-                        Button(action: { Task { await bakeAllEdits(); applyAndNext() } }) { Text("Next").font(.headline) }
+                    headerBar
+                    mediaPagerView
+                    controlsView
+                }
+                // Busy overlay for AI meme
+                if isAIMemeWorking {
+                    ZStack {
+                        Color.black.opacity(0.5).ignoresSafeArea()
+                        VStack(spacing: 8) { ProgressView(); Text("AI meme generating…").foregroundStyle(.white) }
+                        .padding(16)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.6)))
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.3))
-                    
-                    TabView(selection: $current) {
-                        ForEach(Array(vm.media.enumerated()), id: \.1.id) { idx, item in
-                            ZStack {
-                                if let ui = renderPreview(for: item) {
-                                    if cropMode {
-                                        CropCanvas(image: ui, aspect: cropAspect, scale: $cropScale, offset: $cropOffset)
-                                    } else {
-                                        ZStack {
-                                            Image(uiImage: ui).resizable().scaledToFit()
-                                            // Caption overlay for current item
-                                            if vm.media.indices.contains(current), vm.media[current].id == item.id {
-                                                CaptionsOverlay(
-                                                    baseImage: ui,
-                                                    items: captions[item.id] ?? [],
-                                                    onChange: { updated in captions[item.id] = updated },
-                                                    selectedId: $selectedCaptionId
-                                                )
-                                                StickersOverlay(
-                                                    baseImage: ui,
-                                                    items: stickers[item.id] ?? [],
-                                                    onChange: { updated in stickers[item.id] = updated },
-                                                    selectedId: $selectedStickerId
-                                                )
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    RoundedRectangle(cornerRadius: 0).fill(Color.white.opacity(0.08))
-                                        .overlay(Image(systemName: "play.circle.fill").font(.system(size: 60)).foregroundStyle(.white))
-                                }
-                            }
-                            .tag(idx)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Color.black)
+                }
+                // Caption editor full-screen panel
+                if let sel = selectedCaptionId, let mid = currentMediaId(), let cap = (captions[mid] ?? []).first(where: { $0.id == sel }) {
+                    ZStack(alignment: .bottom) {
+                        Color.black.opacity(0.45).ignoresSafeArea()
+                        VStack(alignment: .leading, spacing: 10) {
+                            CaptionEditorInline(caption: cap, onChange: { updated in updateCaption(updated) }, onDelete: { deleteCaption(sel) })
+                                .padding(12)
+                                .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.65)))
+                                .padding(.horizontal)
+                            HStack { Spacer(); Button("Done") { selectedCaptionId = nil }.buttonStyle(.borderedProminent) }
+                                .padding(.horizontal)
+                                .padding(.bottom, 8)
                         }
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .automatic))
-                    .onChange(of: current, perform: { _ in updatePreview() })
-                    .onAppear { updatePreview() }
-                    
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 8) {
-                            // Top row: mode toggle
+                    .transition(.move(edge: .bottom))
+                }
+            }
+        }
+
+        // MARK: - Subviews (split to speed up type checking)
+        @ViewBuilder private var headerBar: some View {
+            HStack {
+                Button(action: onBack) { Image(systemName: "chevron.left").font(.title2.weight(.semibold)) }
+                Spacer()
+                Text("Edit").font(.headline)
+                Spacer()
+                Button(action: { Task { await bakeAllEdits(); applyAndNext() } }) { Text("Next").font(.headline) }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.3))
+        }
+
+        @ViewBuilder private var mediaPagerView: some View {
+            TabView(selection: $current) {
+                ForEach(Array(vm.media.enumerated()), id: \.1.id) { idx, item in
+                    ZStack {
+                        if let ui = renderPreview(for: item) {
+                            if cropMode {
+                                CropCanvas(image: ui, aspect: cropAspect, scale: $cropScale, offset: $cropOffset)
+                            } else {
+                                ZStack {
+                                    Image(uiImage: ui).resizable().scaledToFit()
+                                    if vm.media.indices.contains(current), vm.media[current].id == item.id {
+                                        CaptionsOverlay(
+                                            baseImage: ui,
+                                            items: captions[item.id] ?? [],
+                                            onChange: { updated in captions[item.id] = updated },
+                                            selectedId: $selectedCaptionId
+                                        )
+                                        StickersOverlay(
+                                            baseImage: ui,
+                                            items: stickers[item.id] ?? [],
+                                            onChange: { updated in stickers[item.id] = updated },
+                                            selectedId: $selectedStickerId
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            RoundedRectangle(cornerRadius: 0).fill(Color.white.opacity(0.08))
+                                .overlay(Image(systemName: "play.circle.fill").font(.system(size: 60)).foregroundStyle(.white))
+                        }
+                    }
+                    .tag(idx)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+            .onChange(of: current, perform: { _ in updatePreview() })
+            .onAppear { updatePreview() }
+            .overlay(alignment: .trailing) {
+                SideRail(
+                    onCrop: { cropMode = true },
+                    onCaption: { addCaption() },
+                    onStickers: { showStickerPicker = true },
+                    onEffects: { cropMode = false },
+                    onMeme: { generateAIMeme() }
+                )
+                .padding(.trailing, 8)
+                .padding(.top, 40)
+            }
+        }
+
+        @ViewBuilder private var controlsView: some View {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 8) {
+                    if cropMode {
+                        ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
-                                Button(action: { cropMode.toggle() }) { Image(systemName: cropMode ? "crop.rotate" : "crop") }
-                                    .buttonStyle(.bordered)
-                                    .tint(.white.opacity(0.2))
-                                    .foregroundStyle(.white)
-                                Button(action: addCaption) { Image(systemName: "textformat") }
-                                    .buttonStyle(.bordered)
-                                    .tint(.white.opacity(0.2))
-                                    .foregroundStyle(.white)
-                                Spacer()
-                                Button(action: { showStickerPicker.toggle() }) { Image(systemName: "face.smiling") }
-                                    .buttonStyle(.bordered)
-                                    .tint(.white.opacity(0.2))
-                                    .foregroundStyle(.white)
-                                Button(action: { generateAIMeme() }) { Image(systemName: "text.bubble") }
-                                    .buttonStyle(.bordered)
-                                    .tint(.white.opacity(0.2))
-                                    .foregroundStyle(.white)
+                                ForEach(CropAspect.allCases, id: \.self) { a in
+                                    Text(a.rawValue)
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(cropAspect == a ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
+                                        .clipShape(Capsule())
+                                        .onTapGesture { cropAspect = a }
+                                }
                             }
                             .padding(.horizontal)
-                            
-                            if cropMode {
-                                // Crop controls: aspect + apply
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 10) {
-                                        ForEach(CropAspect.allCases, id: \.self) { a in
-                                            Text(a.rawValue)
-                                                .font(.caption.weight(.semibold))
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 6)
-                                                .background(cropAspect == a ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
-                                                .clipShape(Capsule())
-                                                .onTapGesture { cropAspect = a }
-                                        }
-                                    }
-                                    .padding(.horizontal)
-                                }
-                                HStack {
-                                    Button("Reset") { cropScale = 1.0; cropOffset = .zero }
-                                    Spacer()
-                                    Button("Apply Crop") { applyCrop() }
-                                }
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal)
-                                .padding(.bottom, 8)
-                            } else {
-                                // Filter controls
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 10) {
-                                        ForEach(Control.allCases, id: \.self) { c in
-                                            Text(c.rawValue)
-                                                .font(.caption.weight(.semibold))
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 6)
-                                                .background(activeControl == c ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
-                                                .clipShape(Capsule())
-                                                .onTapGesture { activeControl = c }
-                                        }
-                                    }
-                                    .padding(.horizontal)
-                                }
-                                HStack {
-                                    Text("0%").foregroundStyle(.white.opacity(0.7)).font(.caption)
-                                    Slider(value: bindingForActive(), in: rangeForActive())
-                                    Text("100%").foregroundStyle(.white.opacity(0.7)).font(.caption)
-                                }
-                                .padding(.horizontal)
-                                HStack {
-                                    Button("Reset") { resetCurrent() }
-                                    Spacer()
-                                    Button("Apply to Image") { bakeCurrent() }
-                                }
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal)
-                                .padding(.bottom, 8)
-                                // Inline caption editor (when a caption is selected)
-                                if let sel = selectedCaptionId, let mid = currentMediaId(), let cap = (captions[mid] ?? []).first(where: { $0.id == sel }) {
-                                    CaptionEditorInline(caption: cap, onChange: { updated in updateCaption(updated) }, onDelete: { deleteCaption(sel) })
-                                        .padding(.horizontal)
-                                        .padding(.bottom, 8)
+                        }
+                        HStack {
+                            Button("Reset") { cropScale = 1.0; cropOffset = .zero }
+                            Spacer()
+                            Button("Apply Crop") { applyCrop() }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(Control.allCases, id: \.self) { c in
+                                    Text(c.rawValue)
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(activeControl == c ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
+                                        .clipShape(Capsule())
+                                        .onTapGesture { activeControl = c }
                                 }
                             }
+                            .padding(.horizontal)
                         }
-                    }
-                    .background(Color.black.opacity(0.3))
-                    .sheet(isPresented: $showStickerPicker) { StickerPickerView { name in addSticker(named: name) } }
-                    .sheet(isPresented: $showMemeDialog) { MemePromptSheet(onAdd: { top, bottom in addMeme(top: top, bottom: bottom); showMemeDialog = false }) }
-                    if isAIMemeWorking {
-                        ZStack {
-                            Color.black.opacity(0.5).ignoresSafeArea()
-                            VStack(spacing: 8) {
-                                ProgressView()
-                                Text("AI meme generating…").foregroundStyle(.white)
-                            }
-                            .padding(16)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.6)))
+                        HStack {
+                            Text("0%").foregroundStyle(.white.opacity(0.7)).font(.caption)
+                            Slider(value: bindingForActive(), in: rangeForActive())
+                            Text("100%").foregroundStyle(.white.opacity(0.7)).font(.caption)
                         }
+                        .padding(.horizontal)
+                        HStack {
+                            Button("Reset") { resetCurrent() }
+                            Spacer()
+                            Button("Apply to Image") { bakeCurrent() }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
                     }
                 }
             }
+            .background(Color.black.opacity(0.3))
+            .sheet(isPresented: $showStickerPicker) { StickerPickerView(onPick: { name, data in addSticker(named: name, data: data) }) }
+            .sheet(isPresented: $showMemeDialog) { MemePromptSheet(onAdd: { top, bottom in addMeme(top: top, bottom: bottom); showMemeDialog = false }) }
         }
             
             func currentMediaId() -> UUID? { vm.media.indices.contains(current) ? vm.media[current].id : nil }
@@ -818,10 +824,10 @@ struct CreatePostSheet: View {
                 captions[mid] = arr
                 selectedCaptionId = cap.id
             }
-            func addSticker(named: String) {
+            func addSticker(named: String, data: Data? = nil) {
                 guard let mid = currentMediaId(), let ui = preview else { return }
                 let center = CGPoint(x: ui.size.width/2, y: ui.size.height/2)
-                let st = Sticker(id: UUID(), imageName: named, center: center, scale: 1.0, rotation: .degrees(0))
+                let st = Sticker(id: UUID(), imageName: named, imageData: data, center: center, scale: 1.0, rotation: .degrees(0))
                 var arr = stickers[mid] ?? []
                 arr.append(st)
                 stickers[mid] = arr
@@ -1071,7 +1077,11 @@ struct CreatePostSheet: View {
                     parent.addSublayer(layer)
                 }
                 for s in stickers {
-                    if let ui = UIImage(named: s.imageName)?.cgImage {
+                    let cg: CGImage? = {
+                        if let d = s.imageData, let img = UIImage(data: d)?.cgImage { return img }
+                        return UIImage(named: s.imageName)?.cgImage
+                    }()
+                    if let ui = cg {
                         let baseW = min(renderSize.width, renderSize.height) * 0.25
                         let w = baseW * s.scale
                         let h = w * CGFloat(ui.height) / CGFloat(ui.width)
@@ -1231,6 +1241,47 @@ struct CreatePostSheet: View {
                 return ui
             }
         }
+
+        // MARK: - Android-style side rail
+        private struct SideRail: View {
+            var onCrop: () -> Void
+            var onCaption: () -> Void
+            var onStickers: () -> Void
+            var onEffects: () -> Void
+            var onMeme: () -> Void
+            @State private var expanded = false
+            var body: some View {
+                VStack(spacing: 12) {
+                    Button(action: { withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() } }) {
+                        Image(systemName: expanded ? "chevron.right" : "chevron.left")
+                            .rotationEffect(.degrees(90))
+                            .padding(8)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white.opacity(0.15))
+                    .foregroundStyle(.white)
+                    railButton(icon: "crop", label: "Crop", action: onCrop, expanded: expanded)
+                    railButton(icon: "textformat", label: "Caption", action: onCaption, expanded: expanded)
+                    railButton(icon: "face.smiling", label: "Stickers", action: onStickers, expanded: expanded)
+                    railButton(icon: "wand.and.stars", label: "Effects", action: onEffects, expanded: expanded)
+                    railButton(icon: "text.bubble", label: "AI Meme", action: onMeme, expanded: expanded)
+                    Spacer()
+                }
+            }
+            @ViewBuilder
+            private func railButton(icon: String, label: String, action: @escaping () -> Void, expanded: Bool) -> some View {
+                HStack(spacing: 8) {
+                    Button(action: action) {
+                        Image(systemName: icon)
+                            .padding(8)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white.opacity(0.15))
+                    .foregroundStyle(.white)
+                    if expanded { Text(label).font(.caption).foregroundStyle(.white).transition(.opacity) }
+                }
+            }
+        }
         
         // MARK: - Captions overlay view
         private struct CaptionsOverlay: View {
@@ -1306,8 +1357,15 @@ struct CreatePostSheet: View {
             @State private var localOffset: CGSize = .zero
             var body: some View {
                 let mapped = mapPoint(sticker.center, from: imageSize, to: viewSize)
-                let ui = Image(sticker.imageName)
-                ui
+                let ui: UIImage? = {
+                    if let d = sticker.imageData { return UIImage(data: d) }
+                    return nil
+                }()
+                let imageView: Image = {
+                    if let img = ui { return Image(uiImage: img) }
+                    return Image(sticker.imageName)
+                }()
+                imageView
                     .resizable()
                     .scaledToFit()
                     .frame(width: max(40, viewSize.width * 0.25) * (localScale == 1.0 ? sticker.scale : localScale))
@@ -1345,21 +1403,48 @@ struct CreatePostSheet: View {
         
         // MARK: - Simple sticker picker
         private struct StickerPickerView: View {
-            var onPick: (String) -> Void
-            // Use a subset of assets shipped in AppImages
-            private let candidates = ["unicorn", "rose", "trophy", "diamond", "gift", "friends", "google", "logo", "bell", "nebula"]
+            var onPick: (String, Data?) -> Void
+            @State private var remote: [SupabaseManager.DBSticker] = []
+            private let supa = SupabaseManager.shared
+            private let localCandidates = ["unicorn", "rose", "trophy", "diamond", "gift", "friends", "google", "logo", "bell", "nebula"]
             var body: some View {
                 NavigationStack {
                     ScrollView {
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
-                            ForEach(candidates, id: \.self) { name in
-                                Image(name).resizable().scaledToFit().frame(height: 64).onTapGesture { onPick(name) }
+                        VStack(alignment: .leading, spacing: 12) {
+                            if !remote.isEmpty {
+                                Text("Featured").font(.subheadline.weight(.semibold)).padding(.horizontal)
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                                    ForEach(remote) { s in
+                                        if let url = URL(string: s.image_url) {
+                                            AsyncImage(url: url) { img in
+                                                img.resizable().scaledToFit()
+                                            } placeholder: { Color(.secondarySystemBackground) }
+                                            .frame(height: 64)
+                                            .onTapGesture {
+                                                Task {
+                                                    if let (data, _) = try? await URLSession.shared.data(from: url) {
+                                                        onPick(s.name, data)
+                                                    } else { onPick(s.name, nil) }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal)
                             }
+                            Text("Library").font(.subheadline.weight(.semibold)).padding(.horizontal)
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                                ForEach(localCandidates, id: \.self) { name in
+                                    Image(name).resizable().scaledToFit().frame(height: 64).onTapGesture { onPick(name, nil) }
+                                }
+                            }
+                            .padding(.horizontal)
                         }
-                        .padding()
+                        .padding(.top, 8)
                     }
                     .navigationTitle("Stickers")
                 }
+                .task { if remote.isEmpty { if let rows = try? await supa.fetchStickers() { remote = rows } } }
             }
         }
         

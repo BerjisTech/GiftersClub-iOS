@@ -151,7 +151,8 @@ struct LiveBroadcastView: View {
                 }
             } else if tiles.count == 1 {
                 LKVideoView(track: tiles.first!.track)
-                    .scaleEffect(x: publisher.isFront ? -1 : 1, y: 1)
+                    // Show host preview as viewers see it (no mirror)
+                    .scaleEffect(x: 1, y: 1)
                     .ignoresSafeArea()
             } else {
                 let cols: [GridItem] = Array(repeating: GridItem(.flexible(), spacing: 8), count: tiles.count <= 2 ? 1 : (tiles.count <= 4 ? 2 : 3))

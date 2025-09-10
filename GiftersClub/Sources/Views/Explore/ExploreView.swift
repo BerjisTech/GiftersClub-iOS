@@ -275,6 +275,8 @@ private struct ExploreLiveGrid: View {
 
 private struct LiveCardCell: View {
     let live: SupabaseManager.DBLiveStreamWithStats
+    @State private var profile: SupabaseManager.DBProfile? = nil
+    private let supa = SupabaseManager.shared
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             ZStack {
@@ -289,11 +291,21 @@ private struct LiveCardCell: View {
                     Spacer()
                     Label("\(live.viewer_count ?? 0)", systemImage: "eye.fill").foregroundStyle(.white).font(.caption2)
                 }
+                if let p = profile {
+                    HStack(spacing: 6) {
+                        if let img = p.image, let u = URL(string: img) {
+                            AsyncImage(url: u) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                                .frame(width: 20, height: 20).clipShape(Circle())
+                        }
+                        Text(p.name ?? p.username).font(.caption.weight(.semibold)).foregroundStyle(.white)
+                    }
+                }
                 Text(live.title).font(.subheadline.weight(.semibold)).foregroundStyle(.white).lineLimit(2)
             }
             .padding(8)
         }
         .background(Color.black)
+        .task { if profile == nil { if let p = try? await supa.fetchProfileByUserId(live.host_id) { profile = p } } }
     }
 }
 

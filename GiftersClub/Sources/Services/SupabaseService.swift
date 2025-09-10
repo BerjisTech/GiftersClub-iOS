@@ -209,6 +209,7 @@ final class SupabaseManager: ObservableObject {
         let updated_at: String?
     }
     struct DBGift: Decodable { let id: String; let name: String?; let tokens: Int?; let image: String? }
+    struct DBSticker: Decodable, Identifiable { let id: String; let name: String; let image_url: String; let is_active: Bool?; let sort_index: Int? }
     struct DBTopGifter: Decodable {
         let user_id: String
         let username: String
@@ -537,6 +538,18 @@ final class SupabaseManager: ObservableObject {
             return lhs.value > rhs.value
         }.map { $0.key }
         return Array(sorted.prefix(limit))
+    }
+
+    // MARK: - Stickers (remote gallery)
+    func fetchStickers() async throws -> [DBSticker] {
+        let res: PostgrestResponse<[DBSticker]> = try await client
+            .from("stickers")
+            .select("*")
+            .eq("is_active", value: true)
+            .order("sort_index", ascending: false)
+            .order("created_at", ascending: false)
+            .execute()
+        return res.value
     }
 
     // MARK: - Profile Posts (minimal for grid + access)
