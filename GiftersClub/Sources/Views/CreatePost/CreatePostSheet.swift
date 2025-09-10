@@ -799,7 +799,7 @@ struct CreatePostSheet: View {
                 }
             }
             .background(Color.black.opacity(0.3))
-            .sheet(isPresented: $showStickerPicker) { StickerPickerView(onPick: { name, data in addSticker(named: name, data: data) }) }
+            .sheet(isPresented: $showStickerPicker) { StickerPickerView(onPick: { name, data in addSticker(named: name, data: data); showStickerPicker = false }) }
             .sheet(isPresented: $showMemeDialog) { MemePromptSheet(onAdd: { top, bottom in addMeme(top: top, bottom: bottom); showMemeDialog = false }) }
         }
             
@@ -971,7 +971,11 @@ struct CreatePostSheet: View {
                 }
                 if let sts = stickers[mediaId] {
                     for s in sts {
-                        if let ui = UIImage(named: s.imageName) {
+                        let ui: UIImage? = {
+                            if let d = s.imageData, let img = UIImage(data: d) { return img }
+                            return UIImage(named: s.imageName)
+                        }()
+                        if let ui = ui {
                             let size = CGSize(width: ui.size.width, height: ui.size.height)
                             let center = s.center
                             let rect = CGRect(x: center.x - size.width/2, y: center.y - size.height/2, width: size.width, height: size.height)
