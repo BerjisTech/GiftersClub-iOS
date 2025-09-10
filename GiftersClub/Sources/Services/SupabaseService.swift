@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Combine
 import Supabase
 import Realtime
@@ -1348,6 +1349,45 @@ final class SupabaseManager: ObservableObject {
             .limit(limit)
             .execute()
         return res.value
+    }
+
+    func deleteComment(id: String) async throws {
+        _ = try await client
+            .from("comments")
+            .delete()
+            .eq("id", value: id)
+            .execute()
+    }
+
+    func fetchPostOwnerId(postId: String) async throws -> String? {
+        struct Row: Decodable { let user_id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("posts")
+            .select("user_id")
+            .eq("id", value: postId)
+            .limit(1)
+            .execute()
+        return res.value.first?.user_id
+    }
+
+    // MARK: - AI Meme generation via Supabase Edge Function
+    struct MemeRes: Decodable { let top_text: String?; let bottom_text: String?; let stickers: [String]? }
+    func generateMeme(image: UIImage) async throws -> MemeRes? {
+        guard let data = image.jpegData(compressionQuality: 0.85) else { return nil }
+        let b64 = data.base64EncodedString()
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/ai-meme")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["image_base64": b64, "sfw": true]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (respData, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
+        return try? JSONDecoder().decode(MemeRes.self, from: respData)
     }
 
     struct InsertComment: Encodable { let post_id: String; let user_id: String; let content: String; let parent_comment_id: String? }
