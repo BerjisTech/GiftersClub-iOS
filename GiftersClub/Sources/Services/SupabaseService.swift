@@ -451,6 +451,7 @@ final class SupabaseManager: ObservableObject {
         let access_type: String?
         let price: Int?
         let required_plan_id: String?
+        let is_explicit: Bool?
         let media: [FeedRPCMedia]?
         let profile: FeedRPCProfile?
         static func == (lhs: ExplorePost, rhs: ExplorePost) -> Bool { lhs.id == rhs.id }
@@ -478,7 +479,9 @@ final class SupabaseManager: ObservableObject {
         let res: PostgrestResponse<RPCResult> = try await client
             .rpc("search_explore", params: ["q": query])
             .execute()
-        return ExploreResult(top: res.value.top, videos: res.value.videos, photos: res.value.photos, users: res.value.users, live: res.value.live)
+        // Filter explicit posts client-side as a safety net
+        func filter(_ arr: [ExplorePost]) -> [ExplorePost] { arr.filter { ($0.is_explicit ?? false) == false } }
+        return ExploreResult(top: filter(res.value.top), videos: filter(res.value.videos), photos: filter(res.value.photos), users: res.value.users, live: res.value.live)
     }
 
     // MARK: - Search Suggestions
@@ -1328,6 +1331,7 @@ final class SupabaseManager: ObservableObject {
         let id: String
         let post_id: String
         let user_id: String
+        let parent_comment_id: String?
         let content: String
         let created_at: String?
         let profile: DBProfile?
@@ -1335,7 +1339,7 @@ final class SupabaseManager: ObservableObject {
 
     func fetchComments(postId: String, limit: Int = 50, offset: Int = 0) async throws -> [DBCommentRow] {
         // Attempt to embed profile fields from profiles table (PostgREST embedded resource)
-        let select = "id,post_id,user_id,content,created_at,profile:profiles(user_id,username,image)"
+        let select = "id,post_id,user_id,parent_comment_id,content,created_at,profile:profiles(user_id,username,image)"
         let res: PostgrestResponse<[DBCommentRow]> = try await client
             .from("comments")
             .select(select)
@@ -1346,14 +1350,14 @@ final class SupabaseManager: ObservableObject {
         return res.value
     }
 
-    struct InsertComment: Encodable { let post_id: String; let user_id: String; let content: String }
-    func addComment(postId: String, content: String) async throws -> DBCommentRow? {
+    struct InsertComment: Encodable { let post_id: String; let user_id: String; let content: String; let parent_comment_id: String? }
+    func addComment(postId: String, content: String, parentCommentId: String? = nil) async throws -> DBCommentRow? {
         guard let me = user?.id.uuidString else { return nil }
-        let payload = InsertComment(post_id: postId, user_id: me, content: content)
+        let payload = InsertComment(post_id: postId, user_id: me, content: content, parent_comment_id: parentCommentId)
         let res: PostgrestResponse<[DBCommentRow]> = try await client
             .from("comments")
             .insert([payload])
-            .select("id,post_id,user_id,content,created_at,profile:profiles(user_id,username,image)")
+            .select("id,post_id,user_id,parent_comment_id,content,created_at,profile:profiles(user_id,username,image)")
             .execute()
         return res.value.first
     }
@@ -1378,6 +1382,27 @@ final class SupabaseManager: ObservableObject {
         }
     }
 
+    /// Add a "share" reaction to a post (used for Share to Profile)
+    func addShare(postId: String) async throws {
+        guard let me = user?.id.uuidString else { return }
+        // Only insert if not already shared
+        struct Row: Decodable { let id: String }
+        let exists: PostgrestResponse<[Row]> = try await client
+            .from("post_reactions")
+            .select("id")
+            .eq("post_id", value: postId)
+            .eq("user_id", value: me)
+            .eq("type", value: "share")
+            .limit(1)
+            .execute()
+        if exists.value.isEmpty {
+            _ = try await client
+                .from("post_reactions")
+                .insert([ReactionInsert(post_id: postId, user_id: me, type: "share")])
+                .execute()
+        }
+    }
+
     /// Fetch a set of post IDs that the current user has liked.
     func fetchUserLikedPostIDs(postIDs: [String]) async throws -> Set<String> {
         guard let me = user?.id.uuidString, !postIDs.isEmpty else { return [] }
@@ -1390,6 +1415,34 @@ final class SupabaseManager: ObservableObject {
             .in("post_id", values: postIDs)
             .execute()
         return Set(res.value.map { $0.post_id })
+    }
+
+    // MARK: - Comment reactions (like)
+    struct CommentReactionInsert: Encodable { let comment_id: String; let user_id: String; let type: String }
+    func toggleCommentLike(commentId: String) async throws {
+        guard let me = user?.id.uuidString else { return }
+        // Check if like exists
+        struct Row: Decodable { let id: String }
+        let existing: PostgrestResponse<[Row]> = try await client
+            .from("comment_reactions")
+            .select("id")
+            .eq("comment_id", value: commentId)
+            .eq("user_id", value: me)
+            .eq("type", value: "like")
+            .limit(1)
+            .execute()
+        if let row = existing.value.first {
+            _ = try await client
+                .from("comment_reactions")
+                .delete()
+                .eq("id", value: row.id)
+                .execute()
+        } else {
+            _ = try await client
+                .from("comment_reactions")
+                .insert([CommentReactionInsert(comment_id: commentId, user_id: me, type: "like")])
+                .execute()
+        }
     }
 
     // MARK: - Profile Fetch
@@ -2004,6 +2057,65 @@ final class SupabaseManager: ObservableObject {
             .limit(1)
             .execute()
         return res.value.first?.user_id
+    }
+
+    // MARK: - Followers/Following/Gifters lists
+    func fetchFollowers(of userId: String, limit: Int = 100, offset: Int = 0) async throws -> [DBProfile] {
+        struct Row: Decodable { let follower_id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("follows")
+            .select("follower_id")
+            .eq("followed_id", value: userId)
+            .order("created_at", ascending: false)
+            .range(from: offset, to: offset + max(0, limit) - 1)
+            .execute()
+        let ids = res.value.map { $0.follower_id }
+        if ids.isEmpty { return [] }
+        let profs: PostgrestResponse<[DBProfile]> = try await client
+            .from("profiles")
+            .select()
+            .in("user_id", values: ids)
+            .execute()
+        return profs.value
+    }
+
+    func fetchFollowing(of userId: String, limit: Int = 100, offset: Int = 0) async throws -> [DBProfile] {
+        struct Row: Decodable { let followed_id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("follows")
+            .select("followed_id")
+            .eq("follower_id", value: userId)
+            .order("created_at", ascending: false)
+            .range(from: offset, to: offset + max(0, limit) - 1)
+            .execute()
+        let ids = res.value.map { $0.followed_id }
+        if ids.isEmpty { return [] }
+        let profs: PostgrestResponse<[DBProfile]> = try await client
+            .from("profiles")
+            .select()
+            .in("user_id", values: ids)
+            .execute()
+        return profs.value
+    }
+
+    func fetchGifters(for userId: String, limit: Int = 100, offset: Int = 0) async throws -> [DBProfile] {
+        struct Row: Decodable { let gifter: String }
+        // Distinct gifters who sent to this user
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("gift_sent")
+            .select("gifter")
+            .eq("recipient", value: userId)
+            .order("created_at", ascending: false)
+            .range(from: offset, to: offset + max(0, limit) - 1)
+            .execute()
+        let ids = Array(Set(res.value.map { $0.gifter }))
+        if ids.isEmpty { return [] }
+        let profs: PostgrestResponse<[DBProfile]> = try await client
+            .from("profiles")
+            .select()
+            .in("user_id", values: ids)
+            .execute()
+        return profs.value
     }
 
     // MARK: - Leaderboard

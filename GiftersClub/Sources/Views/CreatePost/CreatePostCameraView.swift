@@ -39,7 +39,8 @@ final class CameraController: NSObject, ObservableObject, AVCaptureFileOutputRec
 
     override init() {
         super.init()
-        configureSession()
+        // Defer full session configuration until camera permission is granted.
+        // We still create the session object here so the preview can bind.
     }
 
     func configureSession() {
@@ -62,6 +63,22 @@ final class CameraController: NSObject, ObservableObject, AVCaptureFileOutputRec
             session.addOutput(videoDataOutput)
         }
         session.commitConfiguration()
+    }
+
+    func requestAccessAndConfigureThenStart() {
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+            DispatchQueue.main.async {
+                if granted {
+                    // Recreate a fresh configuration after permission is granted
+                    if !self.isAvailable || self.videoDeviceInput == nil || !self.session.isRunning {
+                        self.configureSession()
+                    }
+                    self.start()
+                } else {
+                    self.isAvailable = false
+                }
+            }
+        }
     }
 
     func start() {
@@ -199,20 +216,24 @@ extension CIFilter {
 
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        // Keep orientation in sync with UI for preview frames
+        if connection.isVideoOrientationSupported {
+            connection.videoOrientation = AVCaptureVideoOrientation.currentInterfaceOrientation
+        }
+        // When no filter is selected, we rely on AVCaptureVideoPreviewLayer for correct orientation & performance
+        guard currentFilter != .none else { return }
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var image = CIImage(cvImageBuffer: buffer)
         // Mirror front camera for preview to feel natural
         if currentPosition == .front { image = image.oriented(.upMirrored) }
-        if currentFilter != .none {
-            switch currentFilter {
-            case .none: break
-            case .mono:
-                image = CIFilter.photoEffectNoir().apply(to: image) ?? image
-            case .sepia:
-                let f = CIFilter.sepiaTone(); f.inputImage = image; f.intensity = Float(max(0, min(1, filterIntensity))); image = f.outputImage ?? image
-            case .vivid:
-                image = CIFilter.photoEffectProcess().apply(to: image) ?? image
-            }
+        switch currentFilter {
+        case .none: break
+        case .mono:
+            image = CIFilter.photoEffectNoir().apply(to: image) ?? image
+        case .sepia:
+            let f = CIFilter.sepiaTone(); f.inputImage = image; f.intensity = Float(max(0, min(1, filterIntensity))); image = f.outputImage ?? image
+        case .vivid:
+            image = CIFilter.photoEffectProcess().apply(to: image) ?? image
         }
         if let cg = ciContext.createCGImage(image, from: image.extent) {
             let ui = UIImage(cgImage: cg)
@@ -286,7 +307,7 @@ struct CreatePostCameraView: View {
                     Text("Camera not available")
                         .font(.headline)
                         .foregroundStyle(.primary)
-                    Text("Use Library or Text Post on Simulator.")
+                    Text("You can use Library or Text Post instead.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 12) {
@@ -300,11 +321,9 @@ struct CreatePostCameraView: View {
                 .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-
-            // Top overlay: left cancel + right controls
+            // Top overlay: left close + right vertical controls
             VStack {
                 HStack(alignment: .top) {
-                    // Top-left cancel/back
                     Button(action: { dismiss() }) {
                         Image(systemName: "xmark")
                             .font(.headline)
@@ -319,109 +338,99 @@ struct CreatePostCameraView: View {
 
                     Spacer()
 
-                    // Top-right vertical controls
                     VStack(spacing: 14) {
                         iconButton(system: "arrow.triangle.2.circlepath.camera") { camera.switchCamera() }
                         iconButton(system: camera.flashOn ? "bolt.fill" : "bolt.slash.fill") { camera.toggleTorch() }
                         iconButton(system: "timer") { DispatchQueue.main.async { activeSheet = .timer } }
-                        iconButton(system: "camera.filters") { /* Advanced filters panel could be implemented here */ }
+                        iconButton(system: "camera.filters") { /* Filters panel hook */ }
                     }
                     .padding(.trailing, 12)
                     .padding(.top, 12)
                 }
                 Spacer()
             }
-            .zIndex(1)
+            .zIndex(2)
 
-            // Bottom overlay with two rows
-            VStack(spacing: 10) {
+            // Bottom overlay with timer presets and capture row
+            VStack(spacing: 12) {
                 Spacer()
-                VStack(spacing: 12) {
-                    // Timer presets (centered)
-                    HStack(spacing: 10) {
-                        timerItem("5s", 5)
-                        timerItem("15s", 15)
-                        timerItem("60s", 60)
-                        timerItem("10m", 600)
+
+                // Preset timers (requested order: 10m, 60s, 15s, 5s)
+                HStack(spacing: 10) {
+                    timerItem("10m", 600)
+                    timerItem("60s", 60)
+                    timerItem("15s", 15)
+                    timerItem("5s", 5)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal)
+
+                HStack(alignment: .center) {
+                    // Left: Filters scroller
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(CameraController.CameraFilter.allCases, id: \.self) { f in
+                                Text(f.rawValue)
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                                    .background(camera.currentFilter == f ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
+                                    .clipShape(Capsule())
+                                    .onTapGesture { camera.currentFilter = f; if f == .none { camera.previewImage = nil } }
+                            }
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal)
+                    .frame(width: 140)
 
-                    HStack(alignment: .center) {
-                        // Filters scroller (left)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(CameraController.CameraFilter.allCases, id: \.self) { f in
-                                    Text(f.rawValue)
-                                        .font(.caption2.weight(.semibold))
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 6)
-                                        .background(camera.currentFilter == f ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
-                                        .clipShape(Capsule())
-                                        .onTapGesture { camera.currentFilter = f }
-                                }
-                            }
+                    Spacer(minLength: 0)
+
+                    // Center: Capture button
+                    ZStack {
+                        Circle().fill(Color.white.opacity(0.18)).frame(width: 88, height: 88)
+                        Circle().fill(Color.white).frame(width: 72, height: 72)
+                        if camera.isRecording { Circle().fill(Color.red).frame(width: 32, height: 32) }
+                    }
+                    .contentShape(Circle())
+                    .onTapGesture { handleTapCapture() }
+                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in handleLongPressCapture() })
+
+                    Spacer(minLength: 0)
+
+                    // Right: Video/Photo toggle, Text, Library
+                    HStack(spacing: 16) {
+                        iconButton(system: isVideoMode ? "camera.fill" : "video.fill") {
+                            isVideoMode.toggle(); camera.mode = isVideoMode ? .video : .photo
                         }
-                        .frame(width: 140)
-
-                        Spacer(minLength: 0)
-
-                        // Capture button (center)
-                        ZStack {
-                            Circle().fill(Color.white.opacity(0.18)).frame(width: 88, height: 88)
-                            Circle().fill(Color.white).frame(width: 72, height: 72)
-                            if camera.isRecording {
-                                Circle().fill(Color.red).frame(width: 32, height: 32)
-                            }
+                        iconButton(system: "textformat") { DispatchQueue.main.async { activeSheet = .textEditor } }
+                        PhotosPicker(selection: $pickerItems, maxSelectionCount: 6, matching: .any(of: [.images, .videos])) {
+                            Image(systemName: "photo.on.rectangle").font(.title3).foregroundStyle(.white)
                         }
-                        .contentShape(Circle())
-                        .onTapGesture { handleTapCapture() }
-                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in handleLongPressCapture() })
-
-                        Spacer(minLength: 0)
-
-                        // Right icon row: toggle mode, text, library
-                        HStack(spacing: 16) {
-                            iconButton(system: isVideoMode ? "camera.fill" : "video.fill") {
-                                isVideoMode.toggle(); camera.mode = isVideoMode ? .video : .photo
-                            }
-                            iconButton(system: "textformat") { DispatchQueue.main.async { activeSheet = .textEditor } }
-                            PhotosPicker(selection: $pickerItems, maxSelectionCount: 6, matching: .any(of: [.images, .videos])) {
-                                Image(systemName: "photo.on.rectangle").font(.title3).foregroundStyle(.white)
-                            }
-                            .onChange(of: pickerItems, perform: { newItems in
-                                Task {
-                                    var loaded: [CreatePostViewModel.MediaItem] = []
-                                    for item in newItems {
-                                        if let data = try? await item.loadTransferable(type: Data.self) {
-                                            let mime = item.supportedContentTypes.first?.preferredMIMEType ?? "application/octet-stream"
-                                            let kind: CreatePostViewModel.MediaItem.Kind = mime.hasPrefix("video/") ? .video : .photo
-                                            loaded.append(.init(data: data, mime: mime, kind: kind))
-                                        }
+                        .onChange(of: pickerItems, perform: { newItems in
+                            Task {
+                                var loaded: [CreatePostViewModel.MediaItem] = []
+                                for item in newItems {
+                                    if let data = try? await item.loadTransferable(type: Data.self) {
+                                        let mime = item.supportedContentTypes.first?.preferredMIMEType ?? "application/octet-stream"
+                                        let kind: CreatePostViewModel.MediaItem.Kind = mime.hasPrefix("video/") ? .video : .photo
+                                        loaded.append(.init(data: data, mime: mime, kind: kind))
                                     }
-                                    await MainActor.run { vm.media = loaded; activeSheet = .details }
                                 }
-                            })
-                        }
-                        .frame(width: 140)
+                                await MainActor.run { vm.media = loaded; activeSheet = .details }
+                            }
+                        })
                     }
+                    .frame(width: 140)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.bottom, 8)
+                .padding(.top, 2)
                 .background(
                     LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
-                        .ignoresSafeArea()
                 )
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-                .zIndex(1)
             }
+            .zIndex(2)
         }
-        .onAppear {
-            AVCaptureDevice.requestAccess(for: .video) { _ in
-                DispatchQueue.main.async { camera.start() }
-            }
-        }
+        .onAppear { camera.requestAccessAndConfigureThenStart() }
         .onDisappear { camera.stop() }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {

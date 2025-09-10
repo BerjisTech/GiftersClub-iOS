@@ -2,9 +2,11 @@ import SwiftUI
 import UIKit
 
 struct ShareOptionsSheet: View {
+    let postId: String
     let url: URL
     @Environment(\.dismiss) private var dismiss
     @State private var presentSystemShare = false
+    @State private var isSharingToProfile = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -15,6 +17,10 @@ struct ShareOptionsSheet: View {
                     HStack { Image(systemName: "square.and.arrow.up"); Text("Share..."); Spacer() }
                 }
                 .buttonStyle(.bordered)
+                Button(action: shareToProfile) {
+                    HStack { Image(systemName: "person.crop.circle.badge.plus"); Text("Share to Profile"); Spacer() }
+                }
+                .buttonStyle(.borderedProminent)
                 Button(action: copy) {
                     HStack { Image(systemName: "link"); Text("Copy Link"); Spacer() }
                 }
@@ -33,6 +39,18 @@ struct ShareOptionsSheet: View {
     private func copy() {
         UIPasteboard.general.url = url
         dismiss()
+    }
+
+    private func shareToProfile() {
+        isSharingToProfile = true
+        Task {
+            do {
+                try await SupabaseManager.shared.addShare(postId: postId)
+                await MainActor.run { dismiss() }
+            } catch {
+                await MainActor.run { dismiss() }
+            }
+        }
     }
 }
 

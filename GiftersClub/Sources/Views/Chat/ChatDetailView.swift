@@ -90,14 +90,25 @@ struct ChatDetailView: View {
             }
             .padding(.bottom, CustomBottomBar.barHeight)
         }
-        .navigationTitle(partner.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Button(action: {
+                    NotificationCenter.default.post(name: .showGifterProfile, object: partner.username)
+                    NotificationCenter.default.post(name: .gotoProfile, object: nil)
+                }) {
+                    Text(partner.displayName)
+                        .font(.headline)
+                }
+                .buttonStyle(.plain)
+            }
+        }
         .task { await initialLoad() }
         .onDisappear {
             pollTask?.cancel(); pollTask = nil
             Task { await supabase.unsubscribeChat(partnerId: partner.userId) }
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private func initialLoad() async {
@@ -233,6 +244,7 @@ private struct Bubble: View {
                     .fill(fromMe ? AppColors.primaryEnd : Color.primary.opacity(0.06))
             )
             .frame(maxWidth: maxWidth, alignment: fromMe ? .trailing : .leading)
+            .frame(maxWidth: .infinity, alignment: fromMe ? .trailing : .leading)
     }
 }
 

@@ -197,7 +197,6 @@ private struct GroupRow: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.secondary)
         }
         .contentShape(Rectangle())
         .padding(.vertical, 4)

@@ -20,6 +20,7 @@ struct LiveBroadcastView: View {
     @State private var profilesCache: [String: SupabaseManager.DBProfile] = [:]
     @State private var cohostStreamIds: [String] = []
     @State private var commentSubscribedIds: Set<String> = []
+    @State private var giftSubscribedIds: Set<String> = []
     // Matches (battles)
     @State private var battleActive: Bool = false
     @State private var battleId: String? = nil
@@ -66,13 +67,16 @@ struct LiveBroadcastView: View {
             }
             .padding()
         }
-        .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil); Task { await goLiveIfNeeded(); await startHostPolling(); await startRealtimeComments() }; if startManagePanel { showManagePanel = true } }
+        .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil); Task { await goLiveIfNeeded(); await startHostPolling(); await startRealtimeComments(); await startRealtimeGifts() }; if startManagePanel { showManagePanel = true } }
         .onDisappear {
             NotificationCenter.default.post(name: .showBottomBar, object: nil)
             battleTimer?.invalidate(); battleTimer = nil
             battleCountdownTimer?.invalidate(); battleCountdownTimer = nil
             invitesTimer?.invalidate(); invitesTimer = nil
-            Task { for id in commentSubscribedIds { await supa.unsubscribeLiveComments(streamId: id) } }
+            Task {
+                for id in commentSubscribedIds { await supa.unsubscribeLiveComments(streamId: id) }
+                for id in giftSubscribedIds { await supa.unsubscribeGiftSent(streamId: id) }
+            }
         }
         .alert("End Live Stream?", isPresented: $ending) {
             Button("End Live", role: .destructive) { Task { await endLive() } }
@@ -103,6 +107,34 @@ struct LiveBroadcastView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func startRealtimeGifts() async {
+        // Subscribe to gift_sent across this stream and cohost streams to mirror gift comments for host
+        let ids = cohostStreamIds.isEmpty ? [stream.id] : cohostStreamIds
+        for id in ids where !giftSubscribedIds.contains(id) {
+            await supa.subscribeToGiftSent(streamId: id) { gift in
+                Task { @MainActor in
+                    // Resolve gifter username
+                    var uname = "Someone"
+                    if let p = profilesCache[gift.gifter] { uname = p.username }
+                    else if let p = try? await supa.fetchProfileByUserId(gift.gifter) { profilesCache[gift.gifter] = p; uname = p.username }
+                    // Resolve gift name
+                    var gname = "a gift"
+                    if let g = try? await supa.fetchGiftById(gift.gift), let n = g.name, !n.isEmpty { gname = n }
+                    let msg = "\(uname) sent a \(gname)"
+                    let synthetic = SupabaseManager.DBLiveStreamComment(
+                        id: UUID().uuidString,
+                        live_stream_id: gift.live_stream_id,
+                        user_id: gift.gifter,
+                        content: msg,
+                        created_at: gift.created_at
+                    )
+                    comments.append(synthetic)
+                }
+            }
+            _ = await MainActor.run { giftSubscribedIds.insert(id) }
         }
     }
 
@@ -291,6 +323,12 @@ struct LiveBroadcastView: View {
         }
         let iso = ISO8601DateFormatter().string(from: Date())
         do {
+            // Configure audio session for low-latency voice/video to avoid AVAudioEngine errors (-3010)
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playAndRecord, mode: .videoChat, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
+            try? session.setPreferredSampleRate(48000)
+            try? session.setPreferredIOBufferDuration(0.005)
+            try? session.setActive(true, options: .notifyOthersOnDeactivation)
             // Mark live in DB
             _ = try await supa.updateLiveSession(id: stream.id, updates: ["status": "live", "started_at": iso])
             // Connect to LiveKit and publish camera+mic

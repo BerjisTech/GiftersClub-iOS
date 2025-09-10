@@ -85,7 +85,7 @@ struct HomeView: View {
             }
         }
         .sheet(item: $sharePost) { post in
-            ShareOptionsSheet(url: shareURL(for: post))
+            ShareOptionsSheet(postId: post.id, url: shareURL(for: post))
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("share_post"))) { note in
             guard let id = note.object as? String, let p = posts.first(where: { $0.id == id }) else { return }

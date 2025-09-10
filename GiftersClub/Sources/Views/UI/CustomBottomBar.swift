@@ -15,7 +15,7 @@ struct CustomBottomBar: View {
             HStack(alignment: .center) {
                 barItem(icon: "house.fill", tab: .home)
                 Spacer()
-                barItem(icon: "safari.fill", tab: .explore)
+                barItem(icon: "magnifyingglass", tab: .explore)
                 Spacer(minLength: 0)
                 composeButton
                 Spacer(minLength: 0)
