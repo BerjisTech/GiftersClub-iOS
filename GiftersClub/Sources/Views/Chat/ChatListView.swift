@@ -113,8 +113,13 @@ struct ChatListView: View {
     private func loadConversations() async {
         do {
             let details = try await supabase.fetchConversationDetails()
-            conversations = details.map { d in
-                ConversationItem(
+            var items: [ConversationItem] = []
+            for d in details {
+                var content = d.last_message_content
+                if let raw = content, let peerPub = await supabase.fetchPublicKey(for: d.partner_id), let key = try? E2EEKeyManager.shared.sharedSecret(with: peerPub), let dec = try? E2EEKeyManager.shared.decrypt(raw, with: key) {
+                    content = dec
+                }
+                let item = ConversationItem(
                     id: d.partner_id,
                     partner: .init(
                         userId: d.partner_id,
@@ -122,11 +127,13 @@ struct ChatListView: View {
                         displayName: d.partner_name ?? "",
                         imageURL: d.partner_image.flatMap(URL.init(string:))
                     ),
-                    lastMessagePreview: Self.previewText(content: d.last_message_content, attachments: d.last_message_attachments),
+                    lastMessagePreview: Self.previewText(content: content, attachments: d.last_message_attachments),
                     lastMessageTime: Self.relativeTime(fromISO: d.last_message_at),
                     unreadCount: d.unread_count
                 )
+                items.append(item)
             }
+            conversations = items
         } catch {
             // leave as-is on error
         }
