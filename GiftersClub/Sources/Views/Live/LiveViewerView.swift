@@ -46,6 +46,12 @@ struct LiveViewerView: View {
     @State private var giftAnimationText: String = ""
     @State private var giftAnimationLottie: String? = nil
     @State private var giftCache: [String: SupabaseManager.DBGift] = [:]
+    @State private var hostFiltered: [String] = []
+    @State private var mutedByHost: Bool = false
+    @State private var stickToBottom: Bool = true
+    @State private var amModerator: Bool = false
+    @State private var showModeration: Bool = false
+    @State private var modNewWord: String = ""
 
     var body: some View {
         ZStack {
@@ -113,6 +119,15 @@ struct LiveViewerView: View {
         .background(Color.black)
         .toolbar(.hidden, for: .navigationBar)
         .task {
+            // Moderation: block check
+            if (try? await supa.isUserBlockedBy(userId: live.host_id)) == true {
+                await MainActor.run { errorText = "You cannot join this live"; ended = true }
+                return
+            }
+            // Prefetch moderation settings
+            hostFiltered = (try? await supa.fetchFilteredWords(for: live.host_id)) ?? []
+            mutedByHost = (try? await supa.isUserMutedBy(hostId: live.host_id)) ?? false
+            amModerator = await supa.isModeratorOfHost(hostId: live.host_id)
             await join()
             await supa.recordViewerJoin(streamId: live.id)
             await loadComments(); await startStatusPolling()
@@ -264,6 +279,7 @@ struct LiveViewerView: View {
             }
         }
         .onChange(of: ended, perform: { isEnded in if isEnded { NotificationCenter.default.post(name: .showBottomBar, object: nil) } })
+        .sheet(isPresented: $showModeration) { moderationSheet }
     }
 
     private var matchBar: some View {
@@ -459,6 +475,12 @@ struct LiveViewerView: View {
                     }
                     .padding(.leading, 6)
                 }
+                if amModerator {
+                    Button(action: { showModeration = true }) {
+                        Image(systemName: "hand.raised").foregroundStyle(.white)
+                    }
+                    .padding(.leading, 6)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -494,6 +516,7 @@ struct LiveViewerView: View {
     private var bottomBar: some View {
         VStack(spacing: 8) {
             // Comments list (simple overlay: avatar, username + gifter badge, comment)
+            ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(comments) { c in
@@ -525,9 +548,23 @@ struct LiveViewerView: View {
                                     .foregroundStyle(.white)
                             }
                         }
+                        .contextMenu {
+                            if amModerator {
+                                Button("Mute user") { Task { try? await supa.muteUser(hostId: live.host_id, targetUserId: c.user_id) } }
+                                Button("Block user", role: .destructive) { Task { try? await supa.blockUserForHost(hostId: live.host_id, targetUserId: c.user_id) } }
+                            }
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .id(c.id)
                     }
                 }
+                Color.clear.frame(height: 1)
+                    .id("bottom")
+                    .onAppear { stickToBottom = true }
+                    .onDisappear { stickToBottom = false }
+            }
+            .gesture(DragGesture().onChanged { _ in stickToBottom = false })
+            .onChange(of: comments.count) { _ in if stickToBottom { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } }
             }
             .frame(height: 180)
             HStack(spacing: 8) {
@@ -536,7 +573,7 @@ struct LiveViewerView: View {
                 Button(action: { Task { await sendComment() } }) {
                     Text("Send")
                 }
-                .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || mutedByHost)
                 Button(action: { showGiftsSheet = true }) {
                     Image(systemName: "gift.fill")
                         .foregroundStyle(.white)
@@ -621,8 +658,53 @@ struct LiveViewerView: View {
     private func sendComment() async {
         let text = newComment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        // Client-side moderation: drop if muted or contains filtered keywords
+        if mutedByHost { return }
+        let lower = text.lowercased()
+        let blocked = hostFiltered.first { w in !w.isEmpty && lower.contains(w.lowercased()) }
+        if blocked != nil { return }
         if let _ = try? await supa.sendLiveComment(streamId: live.id, content: text) {
             await MainActor.run { newComment = "" }
+        }
+    }
+
+    private var moderationSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Filtered Words for Host").font(.headline)
+                HStack {
+                    TextField("Add filtered word", text: $modNewWord)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Add") {
+                        let w = modNewWord.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !w.isEmpty else { return }
+                        Task {
+                            do { try await supa.addHostFilteredWord(hostId: live.host_id, word: w); hostFiltered = (try? await supa.fetchFilteredWords(for: live.host_id)) ?? hostFiltered; modNewWord = "" }
+                            catch { }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                if hostFiltered.isEmpty {
+                    Text("No filtered words.").foregroundStyle(.secondary)
+                } else {
+                    List(hostFiltered, id: \.self) { w in
+                        HStack {
+                            Text(w)
+                            Spacer()
+                            Button("Remove") { Task { try? await supa.removeHostFilteredWord(hostId: live.host_id, word: w); hostFiltered = (try? await supa.fetchFilteredWords(for: live.host_id)) ?? hostFiltered } }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Moderation")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showModeration = false } } }
         }
     }
 

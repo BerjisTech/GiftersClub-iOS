@@ -14,6 +14,7 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
     @Published var remoteVideoTracks: [LiveKit.VideoTrack] = []
     @Published var remoteVideos: [LKRemoteVideo] = []
     @Published var isFront: Bool = true
+    @Published var beautyOn: Bool = false
 
     let room = Room()
     private var trackPollTimer: Timer? = nil
@@ -58,6 +59,12 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
             self.isFront.toggle()
             self.localVideoTrack = self.room.localParticipant.videoTracks.first?.track as? LiveKit.VideoTrack
         } catch { }
+    }
+
+    func setBeautyFilter(enabled: Bool) {
+        // Placeholder: wire up custom video source with filter pipeline if available
+        self.beautyOn = enabled
+        // In a future iteration, attach a CIFilter-based pipeline or ARKit face beautification
     }
 
     func disconnect() async {

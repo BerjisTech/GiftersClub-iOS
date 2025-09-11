@@ -8,6 +8,7 @@ struct LiveBroadcastView: View {
     let stream: SupabaseManager.DBLiveStream
     var startManagePanel: Bool = false
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var banners: BannerQueue
     @State private var isLive: Bool = false
     @State private var viewers: Int = 0
     @State private var ending: Bool = false
@@ -38,9 +39,17 @@ struct LiveBroadcastView: View {
     @State private var invitesTimer: Timer? = nil
     @State private var inviteQuery: String = ""
     @State private var inviteSuggestions: [SupabaseManager.DBProfile] = []
+    @State private var modQuery: String = ""
+    @State private var modSuggestions: [SupabaseManager.DBProfile] = []
     @State private var addQuery: String = ""
     @State private var addSuggestions: [SupabaseManager.DBProfile] = []
     @State private var addTeam: Int = 1
+    @State private var showViewerList: Bool = false
+    @State private var viewerProfiles: [SupabaseManager.DBProfile] = []
+    @State private var moderatorIds: Set<String> = []
+    @State private var moderatorProfiles: [SupabaseManager.DBProfile] = []
+    @State private var stickToBottom: Bool = true
+    @State private var beautyPipeline: BeautyFilterPipeline? = nil
 
     var body: some View {
         ZStack {
@@ -60,12 +69,16 @@ struct LiveBroadcastView: View {
 
             VStack(spacing: 6) {
                 topBar
+                    .frame(maxWidth: .infinity)
                 if battleActive { matchBar }
-                Spacer()
+                Spacer(minLength: 0)
                 commentsBar
                 bottomBar
+                    .frame(maxWidth: .infinity, alignment: .bottom)
             }
-            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
         }
         .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil); Task { await goLiveIfNeeded(); await startHostPolling(); await startRealtimeComments(); await startRealtimeGifts() }; if startManagePanel { showManagePanel = true } }
         .onDisappear {
@@ -154,6 +167,19 @@ struct LiveBroadcastView: View {
                     // Show host preview as viewers see it (no mirror)
                     .scaleEffect(x: 1, y: 1)
                     .ignoresSafeArea()
+                    .overlay(alignment: .topTrailing) {
+                        Group {
+                            if publisher.beautyOn, let pipe = beautyPipeline {
+                                BeautyPreviewView(pipeline: pipe)
+                                    .frame(width: 120, height: 180)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.4), lineWidth: 1))
+                            } else {
+                                Color.clear
+                            }
+                        }
+                        .padding(8)
+                    }
             } else {
                 let cols: [GridItem] = Array(repeating: GridItem(.flexible(), spacing: 8), count: tiles.count <= 2 ? 1 : (tiles.count <= 4 ? 2 : 3))
                 ScrollView { // allow more than 6 tracks to scroll
@@ -207,6 +233,10 @@ struct LiveBroadcastView: View {
             .padding(.vertical, 6)
             .background(Color.black.opacity(0.35))
             .clipShape(Capsule())
+            .contentShape(Rectangle())
+            .onTapGesture {
+                Task { await loadViewerProfiles(); await refreshModerators(); await MainActor.run { showViewerList = true } }
+            }
 
             Spacer()
 
@@ -223,6 +253,7 @@ struct LiveBroadcastView: View {
     }
 
     private var bottomBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: 8) {
             Button { Task { await publisher.toggleMic() } } label: {
                 Image(systemName: publisher.micOn ? "mic.fill" : "mic.slash.fill")
@@ -235,6 +266,27 @@ struct LiveBroadcastView: View {
             Button { Task { await publisher.toggleCamera() } } label: {
                 Image(systemName: publisher.cameraOn ? "camera.fill" : "camera")
                     .foregroundStyle(.white)
+            }
+            .frame(width: 44, height: 44)
+            .background(Color.black.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            // Effects (beauty/AR) placed before composer so it stays visible
+            Menu {
+                Toggle(isOn: Binding(get: { publisher.beautyOn }, set: { v in
+                    publisher.setBeautyFilter(enabled: v)
+                    if v {
+                        if beautyPipeline == nil { beautyPipeline = BeautyFilterPipeline() }
+                        beautyPipeline?.start()
+                    } else {
+                        beautyPipeline?.stop(); beautyPipeline = nil
+                    }
+                })) {
+                    Label("Beauty", systemImage: "wand.and.stars")
+                }
+                Button("AR Face Effects (coming soon)") {}
+            } label: {
+                Image(systemName: "wand.and.stars").foregroundStyle(.white)
             }
             .frame(width: 44, height: 44)
             .background(Color.black.opacity(0.35))
@@ -253,13 +305,6 @@ struct LiveBroadcastView: View {
             .background(Color.black.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            Button { /* gifts sheet */ } label: {
-                Image(systemName: "gift.fill").foregroundStyle(.white)
-            }
-            .frame(width: 44, height: 44)
-            .background(Color.black.opacity(0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-
             Button { showManagePanel = true } label: {
                 Image(systemName: "person.3.fill").foregroundStyle(.white)
             }
@@ -267,12 +312,16 @@ struct LiveBroadcastView: View {
             .background(Color.black.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
+        .frame(maxHeight: 44)
+        }
         .padding(.bottom, 24)
         .sheet(isPresented: $showManagePanel) { managePanel }
+        .sheet(isPresented: $showViewerList) { viewerListSheet }
     }
 
     private var commentsBar: some View {
         VStack(spacing: 8) {
+            ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(comments, id: \.id) { c in
@@ -304,14 +353,87 @@ struct LiveBroadcastView: View {
                                     .foregroundStyle(.white)
                             }
                         }
+                        .contextMenu {
+                            Button("Mute user") { Task { try? await supa.muteUser(hostId: stream.host_id, targetUserId: c.user_id); banners.show(Banner(title: "User muted", style: .success)) } }
+                            if moderatorIds.contains(c.user_id) {
+                                Button("Remove moderator") { Task { try? await supa.removeLiveModerator(hostId: stream.host_id, moderatorUserId: c.user_id); await refreshModerators(); banners.show(Banner(title: "Moderator removed", style: .success)) } }
+                            } else {
+                                Button("Make moderator") { Task { try? await supa.addLiveModerator(hostId: stream.host_id, moderatorUserId: c.user_id); await refreshModerators(); banners.show(Banner(title: "Added moderator", style: .success)) } }
+                            }
+                            Button("Block user", role: .destructive) { Task { try? await supa.blockUser(targetUserId: c.user_id); banners.show(Banner(title: "User blocked", style: .success)) } }
+                        }
+                        .id(c.id)
                     }
+                    Color.clear.frame(height: 1)
+                        .id("bottom")
+                        .onAppear { stickToBottom = true }
+                        .onDisappear { /* user likely scrolled up */ stickToBottom = false }
                 }
             }
+            .gesture(DragGesture().onChanged { _ in stickToBottom = false })
+            .onChange(of: comments.count) { _ in
+                if stickToBottom { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
+            }
             .frame(height: 140)
+            if !stickToBottom {
+                Button(action: { withAnimation { stickToBottom = true } }) {
+                    Label("Jump to latest", systemImage: "arrow.down.circle.fill")
+                }
+                .buttonStyle(.bordered)
+            }
         }
         .padding(8)
         .background(Color.black.opacity(0.25))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var viewerListSheet: some View {
+        NavigationStack {
+            List(viewerProfiles, id: \.user_id) { p in
+                HStack(spacing: 12) {
+                    if let img = p.image, let url = URL(string: img) {
+                        AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                            .frame(width: 36, height: 36)
+                            .clipShape(Circle())
+                    } else { Circle().fill(Color.white.opacity(0.2)).frame(width: 36, height: 36) }
+                    VStack(alignment: .leading) {
+                        Text("@\(p.username)").font(.subheadline.weight(.semibold))
+                        if let name = p.name, !name.isEmpty { Text(name).font(.caption).foregroundStyle(.secondary) }
+                        if moderatorIds.contains(p.user_id) { Text("Moderator").font(.caption2.weight(.bold)).foregroundStyle(.green) }
+                    }
+                    Spacer()
+                    Menu {
+                        if moderatorIds.contains(p.user_id) {
+                            Button("Remove moderator") { Task { try? await supa.removeLiveModerator(hostId: stream.host_id, moderatorUserId: p.user_id); await refreshModerators(); banners.show(Banner(title: "Moderator removed", style: .success)) } }
+                        } else {
+                            Button("Make moderator") { Task { try? await supa.addLiveModerator(hostId: stream.host_id, moderatorUserId: p.user_id); await refreshModerators(); banners.show(Banner(title: "Added moderator", style: .success)) } }
+                        }
+                        Button("Mute user") { Task { try? await supa.muteUser(hostId: stream.host_id, targetUserId: p.user_id); banners.show(Banner(title: "User muted", style: .success)) } }
+                        Button("Block user", role: .destructive) { Task { try? await supa.blockUser(targetUserId: p.user_id) ; banners.show(Banner(title: "User blocked", style: .success)) } }
+                    } label: {
+                        Image(systemName: "ellipsis.circle").font(.title3)
+                    }
+                }
+            }
+            .navigationTitle("Viewers")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showViewerList = false } } }
+        }
+    }
+
+    private func loadViewerProfiles() async {
+        if let list = try? await supa.fetchLiveViewers(streamId: stream.id) {
+            await MainActor.run { viewerProfiles = list }
+        }
+    }
+
+    private func refreshModerators() async {
+        if let mods = try? await supa.fetchLiveModerators(hostId: stream.host_id) {
+            await MainActor.run {
+                moderatorProfiles = mods
+                moderatorIds = Set(mods.map { $0.user_id })
+            }
+        }
     }
 
     private func goLiveIfNeeded() async {
@@ -522,6 +644,40 @@ struct LiveBroadcastView: View {
                     }
                 }
                 Divider()
+                // Moderators management
+                Text("Moderators").font(.headline)
+                if moderatorProfiles.isEmpty {
+                    Text("No moderators yet").font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    ForEach(moderatorProfiles, id: \.user_id) { p in
+                        HStack {
+                            Text("@\(p.username)")
+                            Spacer()
+                            Button("Remove") {
+                                Task { try? await supa.removeLiveModerator(hostId: stream.host_id, moderatorUserId: p.user_id); await refreshModerators(); banners.show(Banner(title: "Moderator removed", style: .success)) }
+                            }
+                        }
+                    }
+                }
+                VStack(alignment: .leading) {
+                    TextField("Add moderator by @username", text: $modQuery)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: modQuery, perform: { new in Task { await searchMod(new) } })
+                    if !modSuggestions.isEmpty {
+                        List(modSuggestions, id: \.user_id) { u in
+                            HStack {
+                                Text(u.username).font(.subheadline)
+                                Spacer()
+                                Button("Add") {
+                                    Task { try? await supa.addLiveModerator(hostId: stream.host_id, moderatorUserId: u.user_id); await refreshModerators(); await MainActor.run { modQuery = ""; modSuggestions = [] }; banners.show(Banner(title: "Added moderator", style: .success)) }
+                                }
+                            }
+                        }.listStyle(.plain).frame(maxHeight: 200)
+                    }
+                }
+                Divider()
                 // Battle controls
                 Text("Match (Battle)").font(.headline)
                 if !battleActive {
@@ -573,7 +729,7 @@ struct LiveBroadcastView: View {
             }
             .padding()
             .navigationTitle("Manage Live")
-            .task { await loadInvites() }
+            .task { await loadInvites(); await refreshModerators() }
             .onAppear {
                 invitesTimer?.invalidate() // prefer realtime; keep as optional fallback disabled
                 invitesTimer = nil
@@ -620,6 +776,11 @@ struct LiveBroadcastView: View {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { await MainActor.run { addSuggestions = [] }; return }
         if let r = try? await supa.searchProfilesByKeyword(t) { await MainActor.run { addSuggestions = r } }
+    }
+    private func searchMod(_ text: String) async {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { await MainActor.run { modSuggestions = [] }; return }
+        if let r = try? await supa.searchProfilesByKeyword(t) { await MainActor.run { modSuggestions = r } }
     }
     private func addUserToBattle(_ user: SupabaseManager.DBProfile) async {
         guard let bid = battleId else { return }

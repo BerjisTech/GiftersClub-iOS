@@ -150,11 +150,26 @@ private struct AutoPlayVideo: View {
     let url: URL
     var play: Bool
     @State private var player: AVPlayer? = nil
+    @State private var endObserver: NSObjectProtocol? = nil
     var body: some View {
         VideoPlayer(player: player)
-            .onAppear { if player == nil { player = AVPlayer(url: url) }; if play { player?.play() } }
+            .onAppear {
+                if player == nil { player = AVPlayer(url: url) }
+                // Loop on end
+                if let p = player, endObserver == nil {
+                    endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main) { _ in
+                        p.seek(to: .zero)
+                        if play { p.play() }
+                    }
+                }
+                if play { player?.play() }
+            }
             .onChange(of: play, perform: { p in if p { player?.play() } else { player?.pause() } })
-            .onDisappear { player?.pause() }
+            .onDisappear {
+                player?.pause()
+                if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
+                endObserver = nil
+            }
             .ignoresSafeArea()
     }
 }

@@ -1061,6 +1061,19 @@ final class SupabaseManager: ObservableObject {
             .execute()
     }
 
+    // List current viewers for a stream (joined via live_stream_viewers)
+    func fetchLiveViewers(streamId: String, limit: Int = 200) async throws -> [DBProfile] {
+        struct Row: Decodable { let viewer_id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("live_stream_viewers")
+            .select("viewer_id")
+            .eq("live_stream_id", value: streamId)
+            .limit(limit)
+            .execute()
+        let ids = res.value.map { $0.viewer_id }
+        return try await fetchProfilesByUserIds(ids)
+    }
+
     func fetchProfileByUserId(_ userId: String) async throws -> DBProfile? {
         let res: PostgrestResponse<[DBProfile]> = try await client
             .from("profiles")
@@ -2194,6 +2207,17 @@ final class SupabaseManager: ObservableObject {
         return res.value.map { $0.word }
     }
 
+    // Fetch filtered words for a specific user (e.g., host of a live)
+    func fetchFilteredWords(for userId: String) async throws -> [String] {
+        let res: PostgrestResponse<[DBFilteredWord]> = try await client
+            .from("filtered_words")
+            .select("word")
+            .eq("user_id", value: userId)
+            .order("created_at", ascending: false)
+            .execute()
+        return res.value.map { $0.word }
+    }
+
     func addFilteredWord(_ word: String) async throws {
         guard let me = user?.id.uuidString else { return }
         _ = try await client
@@ -2210,6 +2234,143 @@ final class SupabaseManager: ObservableObject {
             .eq("user_id", value: me)
             .eq("word", value: word)
             .execute()
+    }
+
+    // Moderation helpers for host (Edge Functions)
+    func addHostFilteredWord(hostId: String, word: String) async throws {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/add-host-filtered-word")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["hostId": hostId, "word": word])
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+    }
+
+    func removeHostFilteredWord(hostId: String, word: String) async throws {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/remove-host-filtered-word")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["hostId": hostId, "word": word])
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+    }
+
+    func blockUserForHost(hostId: String, targetUserId: String) async throws {
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/host-block-user")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["hostId": hostId, "targetUserId": targetUserId])
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+    }
+
+    func isModeratorOfHost(hostId: String) async -> Bool {
+        guard let me = user?.id.uuidString else { return false }
+        struct Row: Decodable { let moderator_user_id: String }
+        if let res: PostgrestResponse<[Row]> = try? await client
+            .from("live_moderators")
+            .select("moderator_user_id")
+            .eq("host_id", value: hostId)
+            .eq("moderator_user_id", value: me)
+            .limit(1)
+            .execute() {
+            return !res.value.isEmpty
+        }
+        return false
+    }
+
+    // MARK: - Moderation: blocks, mutes, moderators
+    /// Whether current user is blocked by another user (e.g., host).
+    func isUserBlockedBy(userId blockerId: String) async throws -> Bool {
+        guard let me = user?.id.uuidString else { return false }
+        struct Row: Decodable { let blocked_user_id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("user_blocks")
+            .select("blocked_user_id")
+            .eq("blocker_user_id", value: blockerId)
+            .eq("blocked_user_id", value: me)
+            .limit(1)
+            .execute()
+        return !res.value.isEmpty
+    }
+
+    /// Live moderators for a host (persistent across streams)
+    func fetchLiveModerators(hostId: String) async throws -> [DBProfile] {
+        struct Row: Decodable { let moderator_user_id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("live_moderators")
+            .select("moderator_user_id")
+            .eq("host_id", value: hostId)
+            .execute()
+        let ids = res.value.map { $0.moderator_user_id }
+        return try await fetchProfilesByUserIds(ids)
+    }
+
+    func addLiveModerator(hostId: String, moderatorUserId: String) async throws {
+        _ = try await client
+            .from("live_moderators")
+            .insert([["host_id": hostId, "moderator_user_id": moderatorUserId]])
+            .execute()
+    }
+
+    func removeLiveModerator(hostId: String, moderatorUserId: String) async throws {
+        _ = try await client
+            .from("live_moderators")
+            .delete()
+            .eq("host_id", value: hostId)
+            .eq("moderator_user_id", value: moderatorUserId)
+            .execute()
+    }
+
+    /// Mutes for a host (viewer comments should be dropped on client if muted)
+    func isUserMutedBy(hostId: String) async throws -> Bool {
+        guard let me = user?.id.uuidString else { return false }
+        struct Row: Decodable { let muted_user_id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("live_mutes")
+            .select("muted_user_id")
+            .eq("host_id", value: hostId)
+            .eq("muted_user_id", value: me)
+            .limit(1)
+            .execute()
+        return !res.value.isEmpty
+    }
+
+    func muteUser(hostId: String, targetUserId: String) async throws {
+        _ = try await client
+            .from("live_mutes")
+            .insert([["host_id": hostId, "muted_user_id": targetUserId]])
+            .execute()
+    }
+
+    func unmuteUser(hostId: String, targetUserId: String) async throws {
+        _ = try await client
+            .from("live_mutes")
+            .delete()
+            .eq("host_id", value: hostId)
+            .eq("muted_user_id", value: targetUserId)
+            .execute()
+    }
+
+    func fetchMutedUsers(hostId: String, limit: Int = 200) async throws -> [DBProfile] {
+        struct Row: Decodable { let muted_user_id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("live_mutes")
+            .select("muted_user_id")
+            .eq("host_id", value: hostId)
+            .limit(limit)
+            .execute()
+        let ids = res.value.map { $0.muted_user_id }
+        return try await fetchProfilesByUserIds(ids)
     }
 
     // MARK: - Account counts

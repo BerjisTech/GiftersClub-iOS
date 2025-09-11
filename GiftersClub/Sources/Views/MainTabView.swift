@@ -72,6 +72,7 @@ struct MainTabView: View {
         .fullScreenCover(isPresented: $showGoLiveSetup) { GoLiveSetupView() }
         .fullScreenCover(item: $resumeLive) { stream in
             LiveBroadcastView(stream: stream)
+                .environmentObject(banners)
         }
         .fullScreenCover(item: $deepLinkLive) { ctx in
             LiveEntryByIdView(liveId: ctx.id, startManagePanel: ctx.manage, setupMatch: ctx.setupMatch)

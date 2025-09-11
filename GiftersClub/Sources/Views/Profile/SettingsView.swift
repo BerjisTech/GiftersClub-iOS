@@ -44,6 +44,8 @@ private struct SettingsDetailView: View {
     @State private var blocked: [SupabaseManager.DBProfile] = []
     @State private var filtered: [String] = []
     @State private var reported: [SupabaseManager.DBReportedUserItem] = []
+    @State private var moderators: [SupabaseManager.DBProfile] = []
+    @State private var muted: [SupabaseManager.DBProfile] = []
     @State private var newFilter: String = ""
     @State private var searchUsername: String = ""
     @State private var suggestions: [SupabaseManager.DBProfile] = []
@@ -162,8 +164,24 @@ private struct SettingsDetailView: View {
             if filtered.isEmpty { Text("No filtered words.").foregroundStyle(.secondary) } else {
                 ForEach(filtered, id: \.self) { w in HStack { Text(w); Spacer(); Button("Remove") { Task { await removeFilterWord(w) } } }.padding(.vertical, 6) }
             }
+            Divider()
+            Text("Muted Users").font(.headline)
+            if muted.isEmpty { Text("No muted users").foregroundStyle(.secondary) } else {
+                ForEach(muted, id: \.user_id) { p in
+                    HStack { Text("@\(p.username)"); Spacer(); Button("Unmute") { Task { await unmute(p.user_id) } } }
+                }
+            }
+            Divider()
+            Text("Moderators").font(.headline)
+            if moderators.isEmpty { Text("No moderators yet").foregroundStyle(.secondary) } else {
+                ForEach(moderators, id: \.user_id) { p in
+                    HStack { Text("@\(p.username)"); Spacer(); Button("Remove") { Task { await removeModerator(p.user_id) } } }
+                }
+            }
         }
     }
+
+    // Removed old async view-builder helpers
 
     private var interactionContent: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -253,6 +271,10 @@ private struct SettingsDetailView: View {
             blocked = (try? await supabase.fetchBlockedUsers()) ?? []
             reported = (try? await supabase.fetchReportedUsers(limit: 100, offset: 0)) ?? []
             filtered = (try? await supabase.fetchFilteredWords()) ?? []
+            if let me = supabase.user?.id.uuidString {
+                moderators = (try? await supabase.fetchLiveModerators(hostId: me)) ?? []
+                muted = (try? await supabase.fetchMutedUsers(hostId: me)) ?? []
+            }
         case .interaction:
             break
         case .subscriptions:
@@ -278,6 +300,8 @@ private struct SettingsDetailView: View {
     private func unblockUser(_ id: String) async { do { try await supabase.unblockUser(targetUserId: id); blocked = (try? await supabase.fetchBlockedUsers()) ?? []; banners.show(Banner(title: "User unblocked", style: .success)) } catch { banners.show(Banner(title: "Failed to unblock user", style: .error)) } }
     private func addFilterWord() async { let w = newFilter.trimmingCharacters(in: .whitespacesAndNewlines); guard !w.isEmpty else { return }; do { try await supabase.addFilteredWord(w); filtered = (try? await supabase.fetchFilteredWords()) ?? []; newFilter = ""; banners.show(Banner(title: "Filter added", style: .success)) } catch { banners.show(Banner(title: "Failed to add filter", style: .error)) } }
     private func removeFilterWord(_ w: String) async { do { try await supabase.removeFilteredWord(w); filtered = (try? await supabase.fetchFilteredWords()) ?? []; banners.show(Banner(title: "Filter removed", style: .success)) } catch { banners.show(Banner(title: "Failed to remove filter", style: .error)) } }
+    private func removeModerator(_ id: String) async { guard let me = supabase.user?.id.uuidString else { return }; do { try await supabase.removeLiveModerator(hostId: me, moderatorUserId: id); moderators = (try? await supabase.fetchLiveModerators(hostId: me)) ?? []; banners.show(Banner(title: "Moderator removed", style: .success)) } catch { banners.show(Banner(title: "Failed to remove moderator", style: .error)) } }
+    private func unmute(_ id: String) async { guard let me = supabase.user?.id.uuidString else { return }; do { try await supabase.unmuteUser(hostId: me, targetUserId: id); muted = (try? await supabase.fetchMutedUsers(hostId: me)) ?? []; banners.show(Banner(title: "User unmuted", style: .success)) } catch { banners.show(Banner(title: "Failed to unmute user", style: .error)) } }
     private func reportUserByUsername() async {
         let handle = reportUsername.trimmingCharacters(in: .whitespacesAndNewlines)
         let reason = reportReason.trimmingCharacters(in: .whitespacesAndNewlines)
