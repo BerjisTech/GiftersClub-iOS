@@ -32,6 +32,13 @@ final class SupabaseManager: ObservableObject {
         // Load current session (if present)
         let session = try? await client.auth.session
         await MainActor.run { self.setUser(session) }
+        // If already signed in on app start, ensure profile and publish E2EE key
+        if let u = session?.user {
+            await self.ensureProfile(user: u)
+            if let pub = try? E2EEKeyManager.shared.publicKeyBase64() {
+                await self.upsertMyPublicKey(pub)
+            }
+        }
 
         // Listen to auth state changes (Supabase Swift async sequence)
         Task.detached { [weak self] in
