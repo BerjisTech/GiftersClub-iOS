@@ -116,8 +116,14 @@ struct ChatListView: View {
             var items: [ConversationItem] = []
             for d in details {
                 var content = d.last_message_content
-                if let raw = content, let peerPub = await supabase.fetchPublicKey(for: d.partner_id), let key = try? E2EEKeyManager.shared.sharedSecret(with: peerPub), let dec = try? E2EEKeyManager.shared.decrypt(raw, with: key) {
-                    content = dec
+                let looksEncrypted = { (s: String?) -> Bool in
+                    guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+                    return s.hasPrefix("{") && s.contains("\"ct\"")
+                }
+                if looksEncrypted(content) {
+                    if let raw = content, let peerPub = await supabase.fetchPublicKey(for: d.partner_id), let key = try? E2EEKeyManager.shared.sharedSecret(with: peerPub), let dec = try? E2EEKeyManager.shared.decrypt(raw, with: key) {
+                        content = dec
+                    }
                 }
                 let item = ConversationItem(
                     id: d.partner_id,
