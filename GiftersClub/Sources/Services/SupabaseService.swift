@@ -42,6 +42,10 @@ final class SupabaseManager: ObservableObject {
                 }
                 if state.event == .signedIn, let user = state.session?.user {
                     await self.ensureProfile(user: user)
+                    // Publish my E2EE public key (idempotent upsert)
+                    if let pub = try? E2EEKeyManager.shared.publicKeyBase64() {
+                        await self.upsertMyPublicKey(pub)
+                    }
                     await self.evaluateUsernameRequirement()
                     await MainActor.run {
                         if self.needsUsernameSetup == false {
@@ -1776,6 +1780,27 @@ final class SupabaseManager: ObservableObject {
         return res.value
     }
 
+    // MARK: - E2EE user keys
+    struct DBUserKey: Decodable { let user_id: String; let public_key: String; let created_at: String }
+    func upsertMyPublicKey(_ b64: String) async {
+        guard let me = user?.id.uuidString else { return }
+        _ = try? await client
+            .from("user_e2ee_keys")
+            .upsert([["user_id": me, "public_key": b64]])
+            .execute()
+    }
+    func fetchPublicKey(for userId: String) async -> String? {
+        if let res: PostgrestResponse<[DBUserKey]> = try? await client
+            .from("user_e2ee_keys")
+            .select("user_id,public_key,created_at")
+            .eq("user_id", value: userId)
+            .limit(1)
+            .execute() {
+            return res.value.first?.public_key
+        }
+        return nil
+    }
+
     func fetchNotifications(userId: String? = nil, limit: Int = 200) async throws -> [DBNotification] {
         let uid = try await resolvedUserId(explicit: userId)
         let q = client
@@ -1827,7 +1852,16 @@ final class SupabaseManager: ObservableObject {
             messagesCache[partnerId]?.last?.created_at
         }
         do {
-            let delta = try await fetchMessages(partnerId: partnerId, orderAsc: true, sinceISO: since)
+            var delta = try await fetchMessages(partnerId: partnerId, orderAsc: true, sinceISO: since)
+            // Attempt E2EE decrypt
+            if let peerPub = await fetchPublicKey(for: partnerId), let key = try? E2EEKeyManager.shared.sharedSecret(with: peerPub) {
+                delta = delta.map { m in
+                    if let dec = try? E2EEKeyManager.shared.decrypt(m.content, with: key) {
+                        return DBMessage(id: m.id, sender_id: m.sender_id, receiver_id: m.receiver_id, content: dec, created_at: m.created_at, attachments: m.attachments)
+                    }
+                    return m
+                }
+            }
             if delta.isEmpty { return cachedMessages(partnerId: partnerId) }
             // Merge + de-dupe by id
             var merged = cacheQueue.sync { messagesCache[partnerId] ?? [] }
@@ -1857,7 +1891,11 @@ final class SupabaseManager: ObservableObject {
     struct InsertMessage: Encodable { let sender_id: String; let receiver_id: String; let content: String }
     func sendMessage(to partnerId: String, content: String) async throws -> DBMessage? {
         let me = try await resolvedUserId(explicit: nil)
-        let payload = InsertMessage(sender_id: me, receiver_id: partnerId, content: content)
+        var body = content
+        if let peerPub = await fetchPublicKey(for: partnerId), let key = try? E2EEKeyManager.shared.sharedSecret(with: peerPub), let blob = try? E2EEKeyManager.shared.encrypt(content, with: key) {
+            body = blob
+        }
+        let payload = InsertMessage(sender_id: me, receiver_id: partnerId, content: body)
         let res: PostgrestResponse<[DBMessage]> = try await client
             .from("messages")
             .insert([payload])
