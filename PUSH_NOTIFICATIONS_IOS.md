@@ -191,12 +191,11 @@ export async function sendPushToUser(userId: string, alert: { title?: string; bo
 
 Test with a real device build (Ad Hoc/TestFlight) for production pushes, or a debug build for sandbox.
 
-Implemented in this repo (Deno Edge Function):
-- Location: `gifter-club/supabase/functions/send-apns`
-- Exposes POST `/send-apns` (guarded by `X-Admin-Secret`).
-- Reads: `user_device_tokens` to resolve APNs tokens.
-- Secrets needed: `FUNCTION_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `APNS_TEAM_ID`, `APNS_KEY_ID=2RNSXSR6YG`, `APNS_BUNDLE_ID`, `APNS_P8`, `APNS_ENV`.
-- Note: APNs requires HTTP/2. Supabase Edge Functions must support outbound HTTP/2 to APNs hosts for delivery. If not, deploy the included logic on a Node service or use Path B.
+Implemented inline in Edge Functions via helper:
+- Helper: `gifter-club/supabase/functions/_apns.ts` (used by `_notify.ts` and `send-notification-email`).
+- Resolves tokens from `user_device_tokens` and sends to production APNs.
+- Secrets needed: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `APNS_TEAM_ID`, `APNS_KEY_ID=2RNSXSR6YG`, `APNS_BUNDLE_ID`, `APNS_P8` (or `APNS_P8_BA`).
+- Note: Always sends to PRODUCTION APNs. Use TestFlight/Release builds for testing.
 
 ### Path B — Supabase Push (Dashboard integration)
 
