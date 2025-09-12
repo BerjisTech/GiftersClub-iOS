@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         // Convert device token to hex string
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+        // Persist token locally so we can upsert after login if not logged in yet
+        UserDefaults.standard.set(token, forKey: "apns_device_token_hex")
         Task {
             // Upsert APNs token into user_device_tokens
             let me = SupabaseManager.shared.user?.id.uuidString
@@ -70,6 +72,24 @@ struct GiftersClubApp: App {
                     UsernameOnboardingView()
                 } else {
                     MainTabView(deepLink: $deepLink)
+                }
+            }
+            // After login, if we have a cached APNs token, upsert it
+            .onChange(of: supabase.user) { _, newUser in
+                if newUser != nil, let token = UserDefaults.standard.string(forKey: "apns_device_token_hex"), !token.isEmpty {
+                    Task {
+                        _ = try? await SupabaseManager.shared.client
+                            .from("user_device_tokens")
+                            .upsert([[
+                                "user_id": newUser!.id.uuidString,
+                                "platform": "ios",
+                                "provider": "apns",
+                                "token": token,
+                                "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+                            ]])
+                            .select("user_id")
+                            .execute()
+                    }
                 }
             }
             .onOpenURL { url in
