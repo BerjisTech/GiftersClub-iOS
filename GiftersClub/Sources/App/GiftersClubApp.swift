@@ -74,14 +74,16 @@ struct GiftersClubApp: App {
                     MainTabView(deepLink: $deepLink)
                 }
             }
-            // After login, if we have a cached APNs token, upsert it
-            .onChange(of: supabase.user) { _, newUser in
-                if newUser != nil, let token = UserDefaults.standard.string(forKey: "apns_device_token_hex"), !token.isEmpty {
+            // After login, if we have a cached APNs token, upsert it (iOS 14+ compatible)
+            .onChange(of: supabase.user) { newUser in
+                if let user = newUser,
+                   let token = UserDefaults.standard.string(forKey: "apns_device_token_hex"),
+                   !token.isEmpty {
                     Task {
                         _ = try? await SupabaseManager.shared.client
                             .from("user_device_tokens")
                             .upsert([[
-                                "user_id": newUser!.id.uuidString,
+                                "user_id": user.id.uuidString,
                                 "platform": "ios",
                                 "provider": "apns",
                                 "token": token,
