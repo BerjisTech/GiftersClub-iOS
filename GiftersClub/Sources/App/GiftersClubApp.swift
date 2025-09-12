@@ -44,6 +44,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         print("APNs registration failed: \(error)")
         #endif
     }
+
+    // Present notifications while app is in foreground (banner + sound)
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound, .badge])
+    }
 }
 
 @main
