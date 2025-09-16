@@ -132,6 +132,18 @@ final class SupabaseManager: ObservableObject {
         }
     }
 
+    // MARK: - Account Deletion
+    /// Create an account deletion request for the current user.
+    /// Matches the web app behavior by inserting a row into `deletion_requests`.
+    func requestAccountDeletion() async throws {
+        guard let me = user?.id.uuidString else { throw NSError(domain: "DeleteAccount", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not signed in"]) }
+        struct NewDeletion: Encodable { let user_id: String }
+        _ = try await client
+            .from("deletion_requests")
+            .insert([NewDeletion(user_id: me)])
+            .execute()
+    }
+
     // Evaluate if we must force a username prompt (relay emails or missing username)
     @MainActor
     func evaluateUsernameRequirement() async {

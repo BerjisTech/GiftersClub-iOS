@@ -96,6 +96,24 @@ struct AccountView: View {
                 GradientButton(title: "Log out") {
                     Task { await supabase.signOut() }
                 }
+
+                // Legal links
+                VStack(spacing: 8) {
+                    Link("Privacy Policy", destination: SupabaseConfig.webBase.appendingPathComponent("privacy"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Link("Terms of Service", destination: SupabaseConfig.webBase.appendingPathComponent("terms"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                NavigationLink(destination: DeleteAccountView()) {
+                    Text("Delete Account")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
+                }
             }
             .padding()
         }

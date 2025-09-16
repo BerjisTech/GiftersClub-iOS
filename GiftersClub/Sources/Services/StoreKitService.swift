@@ -31,9 +31,11 @@ final class StoreKitService: ObservableObject {
     ]
     @Published var isLoading = false
     @Published var bestValuePackId: String? = nil
+    @Published var lastLoadError: String? = nil
 
     func refreshProducts() async {
         isLoading = true
+        lastLoadError = nil
         defer { isLoading = false }
         do {
             let ids = Set(packs.map { $0.id })
@@ -55,7 +57,11 @@ final class StoreKitService: ObservableObject {
             packs = newPacks
             // Choose best value as the largest token pack (common pricing practice)
             bestValuePackId = newPacks.max(by: { $0.tokens < $1.tokens })?.id
+            if products.isEmpty {
+                lastLoadError = "In‑app purchases are currently unavailable. Ensure IAPs are linked to this app version and Cleared for Sale in App Store Connect."
+            }
         } catch {
+            lastLoadError = (error as NSError).localizedDescription
             // Keep existing packs; UI can still show token counts
         }
     }

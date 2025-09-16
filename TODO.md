@@ -52,3 +52,23 @@ Acceptance checklist before marking “Yes” in App Store Connect:
 - [ ] Non-color indicators exist for all color-coded states; contrast meets WCAG.
 - [ ] Animations respond to Reduce Motion; autoplay behavior adjusted.
 - [ ] Video player supports captions; audio descriptions available where provided.
+
+
+> Roger that. Once Apple approves the address/bank/tax updates, here’s the quick path to green:
+
+  Next Steps
+
+  - Verify “Paid Apps Agreement” = Active (Agreements, Tax, and Banking).
+  - Confirm each token_… IAP is Cleared for Sale, priced, localized, and linked to your submitted version.
+  - Install latest TestFlight build on device → Profile → Buy Tokens → tap Reload. Expect prices + Buy button.
+  - If still empty: capture device logs (Console → filter “StoreKit”) to confirm 0 products vs. other errors.
+  - Optional now: use local StoreKit config for instant testing in Xcode (GiftersClub.storekit already added; select in Scheme → Run → Options).
+
+  Review Notes (suggested)
+
+  - Provide test login credentials (if required before purchase).
+  - Steps: Profile → Buy Tokens → choose token_100 → confirm.
+  - Expected: tokens credited, balance updates, success toast.
+  - Clarify IAP runs via Apple sandbox in TestFlight.
+
+  Ping me when the 24h passes—happy to sanity-check the ASC state and help you verify on-device before re-submitting.

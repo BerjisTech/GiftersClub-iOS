@@ -22,8 +22,15 @@ struct TokenTopUpSheet: View {
                 }
                 Text("Prices include platform fees").font(.caption).foregroundStyle(.secondary)
                 if sk.isLoading { ProgressView().progressViewStyle(.circular) }
+                if let err = sk.lastLoadError, !sk.isLoading {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    Button("Reload") { Task { await sk.refreshProducts() } }
+                        .buttonStyle(.bordered)
+                }
                 VStack(spacing: 8) {
-                    ForEach(sk.packs.filter { $0.product != nil }) { pack in
+                    ForEach(sk.packs) { pack in
                         Button(action: { Task { await buy(pack) } }) {
                             HStack {
                                 VStack(alignment: .leading) {
@@ -33,6 +40,7 @@ struct TokenTopUpSheet: View {
                                         else if isBestValue(pack: pack) { badge("Best value") }
                                     }
                                     if let name = pack.displayName { Text(name).font(.caption).foregroundStyle(.secondary) }
+                                    else { Text("Price pending").font(.caption).foregroundStyle(.secondary) }
                                     if let need = neededTokens {
                                         let leftover = max(pack.tokens - need, 0)
                                         Text("Needs \(need), leftover \(leftover)")
@@ -41,14 +49,14 @@ struct TokenTopUpSheet: View {
                                     }
                                 }
                                 Spacer()
-                                Text(pack.displayPrice ?? "")
+                                Text(pack.displayPrice ?? "Unavailable")
                                     .font(.subheadline.weight(.semibold))
                             }
                             .padding(12)
                             .frame(maxWidth: .infinity)
                             .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
                         }
-                        .disabled(isProcessing)
+                        .disabled(isProcessing || pack.product == nil)
                     }
                 }
                 .padding(.top, 4)
