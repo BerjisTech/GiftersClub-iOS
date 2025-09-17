@@ -7,7 +7,7 @@ public struct VideoThumbnail: View {
     public init(url: URL) { self.url = url }
     public var body: some View {
         GeometryReader { geo in
-            ZStack {
+            ZStack(alignment: .bottom) {
                 if let img = image {
                     Image(uiImage: img)
                         .resizable()
@@ -16,6 +16,7 @@ public struct VideoThumbnail: View {
                         .clipped()
                 } else {
                     Color.black.opacity(0.8)
+                    BlinkingLoadingBar()
                 }
             }
         }
@@ -34,4 +35,3 @@ public struct VideoThumbnail: View {
         }
     }
 }
-

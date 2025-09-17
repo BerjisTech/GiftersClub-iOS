@@ -780,17 +780,20 @@ struct PostPageView: View {
 private struct ZoomableAsyncImage: View {
     let url: URL
     var body: some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let img):
-                img.resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .background(Color.black)
-            case .failure(_): Color.gray
-            case .empty: Color.black
-            @unknown default: Color.black
+        ZStack(alignment: .bottom) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        .background(Color.black)
+                case .failure(_): Color.gray
+                case .empty: Color.black
+                @unknown default: Color.black
+                }
             }
+            BlinkingLoadingBar()
         }
         .ignoresSafeArea()
     }
@@ -829,16 +832,25 @@ private struct VideoBackgroundView: View {
     var play: Bool
     @State private var player: AVPlayer? = nil
     @State private var endObserver: NSObjectProtocol? = nil
+    @State private var timeObserver: Any? = nil
+    @State private var showLoadingBar: Bool = true
 
     var body: some View {
-        VideoPlayer(player: player)
-            .ignoresSafeArea()
-            .onAppear {
+        ZStack(alignment: .bottom) {
+            VideoPlayer(player: player)
+                .ignoresSafeArea()
+            if showLoadingBar { BlinkingLoadingBar() }
+        }
+        .onAppear {
                 if player == nil { player = AVPlayer(url: url) }
                 if let p = player, endObserver == nil {
                     endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main) { _ in
                         p.seek(to: .zero)
                         if play { p.play() }
+                    }
+                    // Hide loading bar once playback advances
+                    timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { t in
+                        if t.seconds > 0.05 { showLoadingBar = false }
                     }
                 }
                 if play { player?.play() }
@@ -850,6 +862,7 @@ private struct VideoBackgroundView: View {
                 player?.pause()
                 if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
                 endObserver = nil
+                if let to = timeObserver { player?.removeTimeObserver(to); timeObserver = nil }
             }
     }
 }

@@ -67,11 +67,16 @@ struct LockablePostCard: View {
         switch media {
         case .some(.image(let url)):
             GeometryReader { geo in
-                AsyncImage(url: url) { img in
-                    img.resizable().scaledToFill()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
-                } placeholder: { Color(.secondarySystemBackground) }
+                ZStack(alignment: .bottom) {
+                    AsyncImage(url: url) { img in
+                        img.resizable().scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                    } placeholder: {
+                        Color(.secondarySystemBackground)
+                        BlinkingLoadingBar()
+                    }
+                }
             }
             .frame(height: isLong ? 220 : 200)
         case .some(.video(let url)):
