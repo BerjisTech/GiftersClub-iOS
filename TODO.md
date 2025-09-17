@@ -77,6 +77,6 @@ Acceptance checklist before marking “Yes” in App Store Connect:
   # User reports
   - add preloader animation in swiperefresh, and other areas that require loading
   - Clicking on user name in chat it should go to the user profile
-  - in create post, selecting from media doesn't send user to edit step bu directly recording or taking a photo does
-  - still in create post add a ui indicator like the one in android that tells user "post uploading in background" so they stop complaining about seeing a post they uploaded if the post is still actually uploading in background
+  - in create post, selecting from media sometimes doesn't send user to edit step bu directly recording or taking a photo does
+  - still in create post, uploading a post sometimes takes time like a heavy video, so add a ui indicator like the one in android that tells user "post uploading in background" so they stop complaining about seeing a post they uploaded if the post is still actually uploading in background
   - do better caching
