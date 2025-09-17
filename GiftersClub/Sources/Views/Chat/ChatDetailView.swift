@@ -13,6 +13,9 @@ struct ChatDetailView: View {
     @State private var selectedMime: String? = nil
     @State private var isSending: Bool = false
 
+    @State private var showDeleteConversationConfirm = false
+    @State private var pendingDeleteMessageId: String? = nil
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
@@ -35,6 +38,15 @@ struct ChatDetailView: View {
                             .frame(maxWidth: .infinity, alignment: msg.fromMe ? .trailing : .leading)
                             .id(msg.id)
                             .padding(.horizontal, 12)
+                            // Context menu for deleting a specific message
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    pendingDeleteMessageId = msg.id
+                                    Task { await deleteMessage(id: msg.id) }
+                                } label: {
+                                    Label("Delete Message", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                 }
@@ -103,6 +115,23 @@ struct ChatDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button(role: .destructive) {
+                        showDeleteConversationConfirm = true
+                    } label: {
+                        Label("Delete Conversation", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .alert("Delete Conversation?", isPresented: $showDeleteConversationConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) { Task { await deleteConversation() } }
+        } message: {
+            Text("This will remove messages in this conversation. Some messages may persist for the other participant depending on server policies.")
         }
         .task { await initialLoad() }
         .onDisappear {
@@ -110,6 +139,24 @@ struct ChatDetailView: View {
             Task { await supabase.unsubscribeChat(partnerId: partner.userId) }
         }
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func deleteMessage(id: String) async {
+        do {
+            try await supabase.deleteMessage(id: id)
+            await loadMessages()
+        } catch {
+            // silently ignore; optionally show banner via NotificationCenter
+        }
+    }
+
+    private func deleteConversation() async {
+        do {
+            try await supabase.deleteConversation(with: partner.userId)
+            await MainActor.run { messages.removeAll() }
+        } catch {
+            // ignore errors
+        }
     }
 
     private func initialLoad() async {

@@ -52,6 +52,16 @@ struct ChatListView: View {
                             } label: {
                                 ConversationRow(item: conv)
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    Task {
+                                        try? await supabase.deleteConversation(with: conv.partner.userId)
+                                        await loadConversations()
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                 }

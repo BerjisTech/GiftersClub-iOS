@@ -1855,6 +1855,51 @@ final class SupabaseManager: ObservableObject {
         return res.value
     }
 
+    // Delete a single message by id (allowed if the current user is sender or receiver per RLS)
+    func deleteMessage(id: String) async throws {
+        _ = try await client
+            .from("messages")
+            .delete()
+            .eq("id", value: id)
+            .select("id")
+            .execute()
+        // Purge from cache
+        cacheQueue.sync {
+            for (k, var list) in messagesCache {
+                if let idx = list.firstIndex(where: { $0.id == id }) {
+                    list.remove(at: idx)
+                    messagesCache[k] = list
+                }
+            }
+        }
+    }
+
+    // Attempt to delete entire conversation (two-way). If deleting partner's messages is denied by RLS,
+    // we still delete my sent messages.
+    func deleteConversation(with partnerId: String) async throws {
+        let me = try await resolvedUserId(explicit: nil)
+        // Try delete both directions
+        do {
+            _ = try await client
+                .from("messages")
+                .delete()
+                .or("and(sender_id.eq.\(me),receiver_id.eq.\(partnerId)),and(sender_id.eq.\(partnerId),receiver_id.eq.\(me))")
+                .select("id")
+                .execute()
+        } catch {
+            // Fallback: delete only my messages (sender_id = me)
+            _ = try? await client
+                .from("messages")
+                .delete()
+                .eq("sender_id", value: me)
+                .eq("receiver_id", value: partnerId)
+                .select("id")
+                .execute()
+        }
+        // Clear cache for that partner
+        _ = cacheQueue.sync { messagesCache.removeValue(forKey: partnerId) }
+    }
+
     // MARK: - Lightweight In-Memory Cache (Chat)
     private var messagesCache: [String: [DBMessage]] = [:] // partnerId -> messages ordered asc
     private let cacheQueue = DispatchQueue(label: "chat-cache-queue")
