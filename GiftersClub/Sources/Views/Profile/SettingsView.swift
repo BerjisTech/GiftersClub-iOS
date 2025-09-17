@@ -183,11 +183,39 @@ private struct SettingsDetailView: View {
 
     // Removed old async view-builder helpers
 
+    @State private var whoCanInteract: String = "anyone" // anyone | followers | friends
+    @State private var isSavingInteraction: Bool = false
     private var interactionContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Interaction").font(.headline)
             Text("Choose who can interact with you.")
-            Picker("Interactions", selection: .constant(0)) { Text("Everyone").tag(0); Text("Followers only").tag(1); Text("Friends only").tag(2) }.pickerStyle(.segmented)
+            Picker("Interactions", selection: Binding(get: {
+                whoCanInteract
+            }, set: { newVal in
+                whoCanInteract = newVal
+                Task { await saveInteraction() }
+            })) {
+                Text("Everyone").tag("anyone")
+                Text("Followers only").tag("followers")
+                Text("Friends only").tag("friends")
+            }
+            .pickerStyle(.segmented)
+            if isSavingInteraction { HStack(spacing: 6) { ProgressView(); Text("Updating…") }.font(.caption).foregroundStyle(.secondary) }
+        }
+        .task {
+            if let s = await supabase.fetchMyUserSettings() {
+                whoCanInteract = (s.who_can_interact ?? "anyone").lowercased()
+            }
+        }
+    }
+    private func saveInteraction() async {
+        isSavingInteraction = true
+        defer { isSavingInteraction = false }
+        do {
+            try await supabase.updateInteractionSetting(whoCanInteract)
+            banners.show(Banner(title: "Interaction updated", style: .success))
+        } catch {
+            banners.show(Banner(title: "Failed to update", style: .error))
         }
     }
 

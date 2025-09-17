@@ -103,8 +103,8 @@ struct HomeView: View {
                 }
                 .frame(width: size.width, height: fullHeight)
             }
-            // Detect a downward pull on the first page to trigger refresh
-            .highPriorityGesture(
+            // Detect a downward pull on the first page to trigger refresh without blocking paging
+            .simultaneousGesture(
                 DragGesture(minimumDistance: 12, coordinateSpace: .local)
                     .onChanged { value in
                         guard selection == 0 else { pullDistance = 0; return }

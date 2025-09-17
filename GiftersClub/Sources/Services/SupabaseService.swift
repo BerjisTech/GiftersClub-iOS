@@ -1820,6 +1820,30 @@ final class SupabaseManager: ObservableObject {
         return nil
     }
 
+    // MARK: - User Settings (interaction privacy)
+    struct DBUserSettings: Decodable { let user_id: String; let who_can_interact: String? }
+    func fetchMyUserSettings() async -> DBUserSettings? {
+        guard let me = user?.id.uuidString else { return nil }
+        if let res: PostgrestResponse<[DBUserSettings]> = try? await client
+            .from("user_settings")
+            .select("user_id,who_can_interact")
+            .eq("user_id", value: me)
+            .limit(1)
+            .execute() {
+            return res.value.first
+        }
+        return nil
+    }
+    func updateInteractionSetting(_ who: String) async throws {
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        struct Row: Encodable { let user_id: String; let who_can_interact: String }
+        _ = try await client
+            .from("user_settings")
+            .upsert([Row(user_id: me, who_can_interact: who)])
+            .select("user_id")
+            .execute()
+    }
+
     func fetchNotifications(userId: String? = nil, limit: Int = 200) async throws -> [DBNotification] {
         let uid = try await resolvedUserId(explicit: userId)
         let q = client
@@ -2155,8 +2179,13 @@ final class SupabaseManager: ObservableObject {
         var put = URLRequest(url: uploadURL)
         put.httpMethod = "PUT"
         put.addValue(mimeType, forHTTPHeaderField: "Content-Type")
-        // Use background session so large uploads can continue if the user navigates away or the app is backgrounded
-        let _ = try await BackgroundUploadManager.shared.upload(request: put, data: bytes)
+        // Prefer background session so large uploads continue in background; fall back to foreground if device rejects background mode
+        do {
+            let _ = try await BackgroundUploadManager.shared.upload(request: put, data: bytes)
+        } catch {
+            // Fallback: foreground upload
+            let _ = try await URLSession.shared.upload(for: put, from: bytes)
+        }
         return presign.publicUrl
     }
 
