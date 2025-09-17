@@ -780,20 +780,23 @@ struct PostPageView: View {
 private struct ZoomableAsyncImage: View {
     let url: URL
     var body: some View {
-        ZStack(alignment: .bottom) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                        .background(Color.black)
-                case .failure(_): Color.gray
-                case .empty: Color.black
-                @unknown default: Color.black
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let img):
+                img.resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .background(Color.black)
+            case .failure(_):
+                Color.gray
+            case .empty:
+                ZStack(alignment: .bottom) {
+                    Color.black
+                    BlinkingLoadingBar()
                 }
+            @unknown default:
+                Color.black
             }
-            BlinkingLoadingBar()
         }
         .ignoresSafeArea()
     }
@@ -834,6 +837,7 @@ private struct VideoBackgroundView: View {
     @State private var endObserver: NSObjectProtocol? = nil
     @State private var timeObserver: Any? = nil
     @State private var showLoadingBar: Bool = true
+    @State private var statusObserver: NSKeyValueObservation? = nil
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -852,6 +856,13 @@ private struct VideoBackgroundView: View {
                     timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { t in
                         if t.seconds > 0.05 { showLoadingBar = false }
                     }
+                    // Also hide when item becomes ready (even if not playing)
+                    if let item = p.currentItem {
+                        statusObserver = item.observe(\.
+                            status, options: [.new]) { it, _ in
+                            if it.status == .readyToPlay { showLoadingBar = false }
+                        }
+                    }
                 }
                 if play { player?.play() }
             }
@@ -863,6 +874,7 @@ private struct VideoBackgroundView: View {
                 if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
                 endObserver = nil
                 if let to = timeObserver { player?.removeTimeObserver(to); timeObserver = nil }
+                statusObserver?.invalidate(); statusObserver = nil
             }
     }
 }
