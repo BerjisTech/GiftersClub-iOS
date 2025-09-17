@@ -72,3 +72,11 @@ Acceptance checklist before marking “Yes” in App Store Connect:
   - Clarify IAP runs via Apple sandbox in TestFlight.
 
   Ping me when the 24h passes—happy to sanity-check the ASC state and help you verify on-device before re-submitting.
+
+
+  # User reports
+  - add preloader animation in swiperefresh, and other areas that require loading
+  - Clicking on user name in chat it should go to the user profile
+  - in create post, selecting from media doesn't send user to edit step bu directly recording or taking a photo does
+  - still in create post add a ui indicator like the one in android that tells user "post uploading in background" so they stop complaining about seeing a post they uploaded if the post is still actually uploading in background
+  - do better caching
