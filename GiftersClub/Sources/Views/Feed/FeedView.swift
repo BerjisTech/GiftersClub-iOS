@@ -109,9 +109,9 @@ struct HomeView: View {
         defer { Task { await MainActor.run { isLoading = false } } }
         do {
             #if DEBUG
-            print("[Feed] fetching posts limit=10 offset=0")
+            print("[Feed] fetching posts limit=50 offset=0")
             #endif
-            let rows = try await supabase.fetchFeed(limit: 10, offset: 0)
+            let rows = try await supabase.fetchFeed(limit: 50, offset: 0)
             var mapped = rows.compactMap(mapRow)
             // Initialize liked state for current user
             let ids = mapped.map { $0.id }
@@ -150,7 +150,7 @@ struct HomeView: View {
             #if DEBUG
             print("[Feed] loadMore offset=\(offset)")
             #endif
-            let rows = try await supabase.fetchFeed(limit: 10, offset: offset)
+            let rows = try await supabase.fetchFeed(limit: 50, offset: offset)
             let mapped = rows.compactMap(mapRow)
             if mapped.isEmpty { return }
             // Refresh lives for this page and merge with existing items
