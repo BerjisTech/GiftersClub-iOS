@@ -45,39 +45,88 @@ struct HomeView: View {
     @State private var sharePost: FeedPost? = nil
     @State private var isLoadingMore = false
     @State private var selectedLive: SupabaseManager.DBLiveStreamWithStats? = nil
+    // Pull-to-refresh for vertical pager
+    @State private var pullDistance: CGFloat = 0
+    @State private var isRefreshingFeed: Bool = false
 
     var body: some View {
         GeometryReader { proxy in
             let size = proxy.size
             let fullHeight = size.height
-            VerticalPageView(items: items, selection: $selection) { idx, _ in
-                let item = items[idx]
-                switch item {
-                case .post(let p):
-                    if let pIndex = posts.firstIndex(where: { $0.id == p.id }) {
-                        PostPageView(post: $posts[pIndex], isActive: selection == idx, bottomSafeInset: proxy.safeAreaInsets.bottom, tabBarHeight: tabBarHeight)
-                            .frame(width: size.width, height: fullHeight)
-                    } else {
-                        Color.black.frame(width: size.width, height: fullHeight)
+            ZStack(alignment: .top) {
+                VerticalPageView(items: items, selection: $selection) { idx, _ in
+                    let item = items[idx]
+                    switch item {
+                    case .post(let p):
+                        if let pIndex = posts.firstIndex(where: { $0.id == p.id }) {
+                            PostPageView(post: $posts[pIndex], isActive: selection == idx, bottomSafeInset: proxy.safeAreaInsets.bottom, tabBarHeight: tabBarHeight)
+                                .frame(width: size.width, height: fullHeight)
+                        } else {
+                            Color.black.frame(width: size.width, height: fullHeight)
+                        }
+                    case .live(let live):
+                        Button(action: { selectedLive = live }) {
+                            LiveCardView(live: live)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+                        .frame(width: size.width, height: fullHeight)
+                        .zIndex(10)
                     }
-                case .live(let live):
-                    Button(action: { selectedLive = live }) {
-                        LiveCardView(live: live)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .frame(width: size.width, height: fullHeight)
-                    .zIndex(10)
                 }
+                .frame(width: size.width, height: fullHeight)
+                .background(Color.black)
+                .ignoresSafeArea(edges: [.bottom])
+
+                // Pull-to-refresh indicator at top
+                VStack(spacing: 6) {
+                    if isRefreshingFeed {
+                        HStack(spacing: 8) { ProgressView(); Text("Refreshing…").foregroundStyle(.white).font(.caption) }
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.top, proxy.safeAreaInsets.top + 8)
+                    } else if pullDistance > 0.0 {
+                        let pct = min(1.0, pullDistance / 90.0)
+                        HStack(spacing: 8) {
+                            Image(systemName: pct >= 1.0 ? "arrow.clockwise.circle.fill" : "arrow.down.circle")
+                                .foregroundStyle(.white)
+                            Text(pct >= 1.0 ? "Release to refresh" : "Pull to refresh")
+                                .foregroundStyle(.white)
+                                .font(.caption)
+                        }
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.top, proxy.safeAreaInsets.top + 8)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(width: size.width, height: fullHeight)
             }
-            .frame(width: size.width, height: fullHeight)
-            .background(Color.black)
-            .ignoresSafeArea(edges: [.bottom])
+            // Detect a downward pull on the first page to trigger refresh
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 12, coordinateSpace: .local)
+                    .onChanged { value in
+                        guard selection == 0 else { pullDistance = 0; return }
+                        if value.translation.height > 0 { pullDistance = value.translation.height }
+                    }
+                    .onEnded { value in
+                        defer { pullDistance = 0 }
+                        guard selection == 0 else { return }
+                        if value.translation.height > 90 {
+                            Task {
+                                await MainActor.run { isRefreshingFeed = true }
+                                await refresh()
+                                await MainActor.run { isRefreshingFeed = false }
+                            }
+                        }
+                    }
+            )
             // Custom bottom bar is separate now; no need to offset by system tab bar height
         }
         .task { await initialLoad() }
-        .refreshable { await refresh() }
+        // Note: SwiftUI .refreshable requires a ScrollView; Home feed uses a pager.
+        // We implement a custom pull-to-refresh gesture above.
         .loadingOverlay(isLoading)
         .sheet(isPresented: $commentsPresenter.isPresented) {
             if let id = commentsPresenter.postId {

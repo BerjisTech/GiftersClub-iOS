@@ -94,7 +94,8 @@ struct ChatDetailView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Button(action: {
-                    NotificationCenter.default.post(name: .showGifterProfile, object: partner.username)
+                    // Route by userId to avoid ambiguity with display names
+                    NotificationCenter.default.post(name: .showGifterProfileId, object: partner.userId)
                     NotificationCenter.default.post(name: .gotoProfile, object: nil)
                 }) {
                     Text(partner.displayName)

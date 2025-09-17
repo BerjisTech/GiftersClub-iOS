@@ -8,6 +8,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        // Tune URLCache to improve image/media caching across the app
+        let mem = 50 * 1024 * 1024 // 50 MB
+        let disk = 500 * 1024 * 1024 // 500 MB
+        URLCache.shared = URLCache(memoryCapacity: mem, diskCapacity: disk, diskPath: "giftersclub-urlcache")
         // Request push authorization and register for remote notifications
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in

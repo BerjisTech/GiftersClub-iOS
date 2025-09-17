@@ -41,6 +41,7 @@ struct FollowersHubView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .onChange(of: tab, perform: { _ in Task { await load() } })
+        .refreshable { await load() }
     }
 
     private func load() async {

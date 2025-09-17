@@ -41,6 +41,13 @@ struct ExploreView: View {
             .onPreferenceChange(SearchBarHeightKey.self) { searchBarHeight = $0 }
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .navigationBarHidden(true)
+            .refreshable {
+                if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    await search(query)
+                } else {
+                    await loadSuggestions()
+                }
+            }
             .navigationDestinationCompat(item: $selectedPost) { post in
                 let media: PostViewerModel.Media = {
                     if let first = post.media?.first, let u = first.url, let url = URL(string: u) {
@@ -226,50 +233,66 @@ private struct SearchBarHeightKey: PreferenceKey {
 // MARK: - Live Explore UI Parts
 private struct ExploreLiveRow: View {
     @State private var lives: [SupabaseManager.DBLiveStreamWithStats] = []
+    @State private var isLoading = false
     private let supabase = SupabaseManager.shared
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
-                ForEach(lives, id: \.id) { l in
-                    NavigationLink(destination: LiveEntryDestination(live: l)) {
-                        LiveCardCell(live: l)
-                            .frame(width: 260, height: 150)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                if isLoading {
+                    ForEach(0..<3, id: \.self) { _ in
+                        ShimmerView().frame(width: 260, height: 150).clipShape(RoundedRectangle(cornerRadius: 12))
                     }
-                    .simultaneousGesture(TapGesture().onEnded { NotificationCenter.default.post(name: .hideBottomBar, object: nil) })
+                } else {
+                    ForEach(lives, id: \.id) { l in
+                        NavigationLink(destination: LiveEntryDestination(live: l)) {
+                            LiveCardCell(live: l)
+                                .frame(width: 260, height: 150)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .simultaneousGesture(TapGesture().onEnded { NotificationCenter.default.post(name: .hideBottomBar, object: nil) })
+                    }
                 }
             }.padding(.horizontal)
         }
         .task { await load() }
+        .refreshable { await load() }
     }
     private func load() async {
+        await MainActor.run { isLoading = true }
         let r = try? await supabase.fetchFeedLiveStreams(limit: 8, query: nil)
-        await MainActor.run { lives = r ?? [] }
+        await MainActor.run { lives = r ?? []; isLoading = false }
     }
 }
 
 private struct ExploreLiveGrid: View {
     @State private var lives: [SupabaseManager.DBLiveStreamWithStats] = []
+    @State private var isLoading = false
     private let supabase = SupabaseManager.shared
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(lives, id: \.id) { l in
-                    NavigationLink(destination: LiveEntryDestination(live: l)) {
-                        LiveCardCell(live: l)
-                            .frame(height: 160)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                if isLoading {
+                    ForEach(0..<6, id: \.self) { _ in ShimmerView().frame(height: 160).clipShape(RoundedRectangle(cornerRadius: 12)) }
+                } else {
+                    ForEach(lives, id: \.id) { l in
+                        NavigationLink(destination: LiveEntryDestination(live: l)) {
+                            LiveCardCell(live: l)
+                                .frame(height: 160)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .simultaneousGesture(TapGesture().onEnded { NotificationCenter.default.post(name: .hideBottomBar, object: nil) })
                     }
-                    .simultaneousGesture(TapGesture().onEnded { NotificationCenter.default.post(name: .hideBottomBar, object: nil) })
                 }
             }.padding(.horizontal)
         }
         .task { await load() }
+        .refreshable { await load() }
     }
     private func load() async {
+        await MainActor.run { isLoading = true }
         let r = try? await supabase.fetchFeedLiveStreams(limit: 20, query: nil)
-        await MainActor.run { lives = r ?? [] }
+        await MainActor.run { lives = r ?? []; isLoading = false }
     }
 }
 

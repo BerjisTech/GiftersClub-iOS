@@ -101,6 +101,10 @@ struct CreatePostSheet: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
         }
         .presentationDetents([.large])
+        // If user picked media from the library, auto-advance to Edit step when media becomes available
+        .onChange(of: vm.media) { newVal in
+            if !newVal.isEmpty && step == .pick { step = .edit }
+        }
         .onAppear {
             // If invoked directly with .details from camera/library, insert the edit step first
             if !firstAppearHandled {

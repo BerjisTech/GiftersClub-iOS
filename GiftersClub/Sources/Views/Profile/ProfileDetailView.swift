@@ -79,6 +79,7 @@ struct ProfileDetailView: View {
                     ))
                 }
             }
+            .refreshable { await loadAll() }
         }
     }
 

@@ -10,6 +10,7 @@ struct MainTabView: View {
     @State private var showCreatePost = false
     @State private var showGoLiveSetup = false
     @State private var profileRouteUsername: String? = nil
+    @State private var profileRouteUserId: String? = nil
     @State private var exploreQuery: String? = nil
     @State private var hideBottomBar: Bool = false
     @State private var liveCheckTimer: Timer? = nil
@@ -29,7 +30,7 @@ struct MainTabView: View {
                 case .home: HomeTabsView()
                 case .explore: ExploreView(externalQuery: $exploreQuery)
                 case .chat: ChatListView()
-                case .profile: ProfileView(routeUsername: $profileRouteUsername)
+                case .profile: ProfileView(routeUsername: $profileRouteUsername, routeUserId: $profileRouteUserId)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -80,6 +81,11 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
             programmaticSelectProfile = true
             if let u = note.object as? String { profileRouteUsername = u }
+            rootTab = .profile
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showGifterProfileId)) { note in
+            programmaticSelectProfile = true
+            if let uid = note.object as? String { profileRouteUserId = uid }
             rootTab = .profile
         }
         .onReceive(NotificationCenter.default.publisher(for: .openChatWithUsername)) { note in
@@ -180,6 +186,7 @@ struct MainTabView: View {
 extension Notification.Name {
     static let showWishlistDetail = Notification.Name("showWishlistDetail")
     static let showGifterProfile = Notification.Name("showGifterProfile")
+    static let showGifterProfileId = Notification.Name("showGifterProfileId")
     static let showCurrentProfile = Notification.Name("showCurrentProfile")
     static let showHomeWishlists = Notification.Name("showHomeWishlists")
     static let exploreSearch = Notification.Name("exploreSearch")
@@ -201,8 +208,10 @@ extension Notification.Name {
 
 struct ProfileView: View {
     @Binding var routeUsername: String?
+    @Binding var routeUserId: String?
     @State private var showGifter = false
     @State private var username: String? = nil
+    @State private var userId: String? = nil
     @StateObject private var banners = BannerQueue()
     @StateObject private var drawer = DrawerManager()
     @State private var btnState: GradientButtonState = .normal
@@ -213,6 +222,7 @@ struct ProfileView: View {
                     ProfileDetailView(username: nil, userId: nil)
                         .navigationDestination(isPresented: $showGifter) {
                             if let u = username { GifterProfileView(username: u) }
+                            else if let uid = userId { GifterProfileViewById(userId: uid) }
                         }
                 }
                 .environmentObject(banners)
@@ -221,16 +231,23 @@ struct ProfileView: View {
         }
         .environmentObject(drawer)
         .onChange(of: routeUsername, perform: { newValue in
-            if let u = newValue { username = u; showGifter = true; routeUsername = nil }
+            if let u = newValue { username = u; userId = nil; showGifter = true; routeUsername = nil }
+        })
+        .onChange(of: routeUserId, perform: { newValue in
+            if let uid = newValue { userId = uid; username = nil; showGifter = true; routeUserId = nil }
         })
         .onAppear {
-            if let u = routeUsername { username = u; showGifter = true; routeUsername = nil }
+            if let u = routeUsername { username = u; userId = nil; showGifter = true; routeUsername = nil }
+            if let uid = routeUserId { userId = uid; username = nil; showGifter = true; routeUserId = nil }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showGifterProfile)) { note in
-            if let u = note.object as? String { username = u; showGifter = true }
+            if let u = note.object as? String { username = u; userId = nil; showGifter = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showGifterProfileId)) { note in
+            if let uid = note.object as? String { userId = uid; username = nil; showGifter = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showCurrentProfile)) { _ in
-            username = nil
+            username = nil; userId = nil
             showGifter = false
         }
     }
@@ -244,6 +261,22 @@ struct GifterProfileView: View {
         DrawerHost {
             ZStack(alignment: .top) {
                 ProfileDetailView(username: username)
+                BannerHost().environmentObject(banners)
+            }
+        }
+        .environmentObject(banners)
+        .environmentObject(drawer)
+    }
+}
+
+struct GifterProfileViewById: View {
+    let userId: String
+    @StateObject private var banners = BannerQueue()
+    @StateObject private var drawer = DrawerManager()
+    var body: some View {
+        DrawerHost {
+            ZStack(alignment: .top) {
+                ProfileDetailView(username: nil, userId: userId)
                 BannerHost().environmentObject(banners)
             }
         }
