@@ -196,6 +196,7 @@ extension Notification.Name {
     static let openChatWithUsername = Notification.Name("openChatWithUsername")
     static let gotoProfile = Notification.Name("gotoProfile")
     static let signedIn = Notification.Name("signedIn")
+    static let refreshHomeFeed = Notification.Name("refreshHomeFeed")
 }
 
 // MARK: - Placeholder Tab Views

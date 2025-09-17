@@ -29,7 +29,15 @@ struct CustomBottomBar: View {
     }
 
     private func barItem(icon: String, tab: RootTab) -> some View {
-        Button(action: { selected = tab }) {
+        Button(action: {
+            if selected == tab {
+                if tab == .home {
+                    NotificationCenter.default.post(name: .refreshHomeFeed, object: nil)
+                }
+            } else {
+                selected = tab
+            }
+        }) {
             Image(systemName: icon)
                 .font(.system(size: selected == tab ? 20 : 18, weight: .semibold))
                 .foregroundStyle(selected == tab ? AppColors.primaryEnd : Color.secondary)

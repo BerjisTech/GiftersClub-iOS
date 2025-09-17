@@ -128,6 +128,12 @@ struct HomeView: View {
         // Note: SwiftUI .refreshable requires a ScrollView; Home feed uses a pager.
         // We implement a custom pull-to-refresh gesture above.
         .loadingOverlay(isLoading)
+        .onReceive(NotificationCenter.default.publisher(for: .refreshHomeFeed)) { _ in
+            Task {
+                await MainActor.run { selection = 0 }
+                await refresh()
+            }
+        }
         .sheet(isPresented: $commentsPresenter.isPresented) {
             if let id = commentsPresenter.postId {
                 CommentsSheet(postId: id)
@@ -162,6 +168,8 @@ struct HomeView: View {
             #endif
             let rows = try await supabase.fetchFeed(limit: 50, offset: 0)
             var mapped = rows.compactMap(mapRow)
+            // Always randomize local ordering so refreshes do not repeat
+            mapped.shuffle()
             // Initialize liked state for current user
             let ids = mapped.map { $0.id }
             if let liked = try? await supabase.fetchUserLikedPostIDs(postIDs: ids) {
@@ -187,7 +195,16 @@ struct HomeView: View {
             let creators = Array(Set(mapped.map { $0.author.userId }))
             await supabase.prefetchAccess(posts: postIds, creators: creators)
         } catch {
-            // Keep old posts on failure
+            // Offline or failed fetch: shuffle existing cached posts to avoid repetition
+            await MainActor.run {
+                if !posts.isEmpty {
+                    var shuffled = posts
+                    shuffled.shuffle()
+                    posts = shuffled
+                    items = interleave(posts: shuffled, lives: [])
+                    selection = 0
+                }
+            }
         }
     }
 
@@ -200,7 +217,9 @@ struct HomeView: View {
             print("[Feed] loadMore offset=\(offset)")
             #endif
             let rows = try await supabase.fetchFeed(limit: 50, offset: offset)
-            let mapped = rows.compactMap(mapRow)
+            var mapped = rows.compactMap(mapRow)
+            // Randomize the new page before interleaving
+            mapped.shuffle()
             if mapped.isEmpty { return }
             // Refresh lives for this page and merge with existing items
             let lives = try? await supabase.fetchFeedLiveStreams(limit: max(1, mapped.count / 3), query: nil)
