@@ -4,6 +4,7 @@ import PhotosUI
 struct ChatDetailView: View {
     let partner: ConversationItem.Partner
     @ObservedObject private var supabase = SupabaseManager.shared
+    @StateObject private var banners = BannerQueue()
     @State private var input: String = ""
     @State private var messages: [MessageItem] = []
     @State private var isLoading = false
@@ -17,7 +18,9 @@ struct ChatDetailView: View {
     @State private var pendingDeleteMessageId: String? = nil
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .top) {
+            BannerHost().environmentObject(banners)
+            VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 10) {
@@ -53,6 +56,7 @@ struct ChatDetailView: View {
                 .onChange(of: messages.last?.id, perform: { last in
                     if let last { withAnimation { proxy.scrollTo(last, anchor: .bottom) } }
                 })
+            }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -259,7 +263,8 @@ struct ChatDetailView: View {
             await loadMessages()
             isSending = false
         } catch {
-            // Ideally show a banner. For now, restore input on failure
+            // Show failure banner and restore input
+            banners.show(Banner(title: "Failed to send attachment", style: .error))
             input = text; isSending = false
         }
     }
