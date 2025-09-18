@@ -142,11 +142,8 @@ final class CreatePostViewModel: ObservableObject {
                     try? FileManager.default.removeItem(at: inputURL)
                     try? FileManager.default.removeItem(at: outputURL)
                 }
-                if session.status == .completed, let outData = try? Data(contentsOf: outputURL) {
-                    cont.resume(returning: outData)
-                } else {
-                    cont.resume(returning: nil)
-                }
+                let data = try? Data(contentsOf: outputURL)
+                cont.resume(returning: data)
             }
         }
     }

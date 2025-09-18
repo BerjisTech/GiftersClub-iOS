@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import AVFoundation
+import AVKit
 
 // MARK: - UITextView helpers for formatting
 private extension UITextView {
@@ -85,6 +86,8 @@ struct CreatePostSheet: View {
     @StateObject private var banners = BannerQueue()
     @State private var firstAppearHandled = false
     @State private var showSettings = false
+    @State private var showPreview = false
+    @State private var previewModel: PostViewerModel? = nil
     
     init(vm: CreatePostViewModel? = nil, initial: CreatePostStep = .pick) {
         _vm = StateObject(wrappedValue: vm ?? CreatePostViewModel())
@@ -107,6 +110,11 @@ struct CreatePostSheet: View {
             }
         }
         .presentationDetents([.large])
+        .sheet(isPresented: $showPreview) {
+            if let model = previewModel {
+                NavigationStack { PostViewer(model: model) }
+            }
+        }
         // If user picked media from the library, auto-advance to Edit step when media becomes available
         .onChange(of: vm.media) { newVal in
             if !newVal.isEmpty && step == .pick { step = .edit }
@@ -246,6 +254,46 @@ struct CreatePostSheet: View {
                 .padding()
         }
 
+        private func presentPreview() {
+            guard !vm.media.isEmpty else { return }
+            // Write temporary URLs for current media
+            let urls: [URL] = vm.media.compactMap { m in
+                let isImage = m.mime.hasPrefix("image/")
+                let ext = isImage ? "jpg" : "mp4"
+                let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("pv_\(UUID().uuidString).\(ext)")
+                try? m.data.write(to: url, options: .atomic)
+                return url
+            }
+            let media: PostViewerModel.Media = {
+                if urls.count == 1 {
+                    return vm.media.first!.mime.hasPrefix("video/") ? .video(urls[0]) : .image(urls[0])
+                } else {
+                    return .images(urls)
+                }
+            }()
+            Task {
+                let supa = SupabaseManager.shared
+                var username: String = supa.user?.email ?? "you"
+                var name: String? = nil
+                var avatarURL: URL? = nil
+                if let me = supa.user?.id.uuidString, let prof = try? await supa.fetchProfile(username: nil, userId: me) {
+                    username = prof?.username.isEmpty == false ? (prof?.username ?? username) : username
+                    name = prof?.name
+                    if let img = prof?.image, let u = URL(string: img) { avatarURL = u }
+                }
+                await MainActor.run {
+                    previewModel = PostViewerModel(
+                        id: UUID().uuidString,
+                        authorUsername: username,
+                        authorName: name,
+                        authorAvatar: avatarURL,
+                        caption: vm.caption,
+                        media: media
+                    )
+                    showPreview = true
+                }
+            }
+        }
         private func EditStep() -> some View {
             Group {
                 if vm.media.isEmpty {
@@ -285,9 +333,11 @@ struct CreatePostSheet: View {
                                     }
                                 }
                                 .frame(width: 80, height: 110)
+                                .onTapGesture { presentPreview() }
                             }
                         }
                     }
+                    .padding(.horizontal)
                 }
                 
                 HashtagCaptionField(text: $vm.caption)
@@ -592,8 +642,8 @@ struct CreatePostSheet: View {
                 LinearGradient(colors: gradients[bgIndex], startPoint: .topLeading, endPoint: .bottomTrailing)
                 VStack {
                     Text(AttributedString(attributed))
-                        .padding()
-                }
+            .padding()
+        }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
                 .frame(width: 640, height: 640)
@@ -827,32 +877,7 @@ struct CreatePostSheet: View {
             TabView(selection: $current) {
                 ForEach(Array(vm.media.enumerated()), id: \.1.id) { idx, item in
                     ZStack {
-                        if let ui = renderPreview(for: item) {
-                            if cropMode {
-                                CropCanvas(image: ui, aspect: cropAspect, scale: $cropScale, offset: $cropOffset)
-                            } else {
-                                ZStack {
-                                    Image(uiImage: ui).resizable().scaledToFit()
-                                    if vm.media.indices.contains(current), vm.media[current].id == item.id {
-                                        CaptionsOverlay(
-                                            baseImage: ui,
-                                            items: captions[item.id] ?? [],
-                                            onChange: { updated in captions[item.id] = updated },
-                                            selectedId: $selectedCaptionId
-                                        )
-                                        StickersOverlay(
-                                            baseImage: ui,
-                                            items: stickers[item.id] ?? [],
-                                            onChange: { updated in stickers[item.id] = updated },
-                                            selectedId: $selectedStickerId
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            RoundedRectangle(cornerRadius: 0).fill(Color.white.opacity(0.08))
-                                .overlay(Image(systemName: "play.circle.fill").font(.system(size: 60)).foregroundStyle(.white))
-                        }
+                        editorCanvas(for: item)
                     }
                     .tag(idx)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1394,7 +1419,8 @@ struct CreatePostSheet: View {
                     exporter.outputFileType = .mp4
                     exporter.videoComposition = videoComp
                     exporter.exportAsynchronously {
-                        cont.resume(returning: exporter.status == .completed ? outURL : nil)
+                        let exists = FileManager.default.fileExists(atPath: outURL.path)
+                        cont.resume(returning: exists ? outURL : nil)
                     }
                 }
             }
@@ -1581,7 +1607,6 @@ struct CreatePostSheet: View {
                     railButton(icon: "wand.and.stars", label: "Effects", action: onEffects, expanded: expanded)
                     railButton(icon: "text.bubble", label: "AI Meme", action: onMeme, expanded: expanded)
                     railButton(icon: "captions.bubble.fill", label: "Auto CC", action: onCaptions, expanded: expanded)
-                    Spacer()
                 }
             }
             @ViewBuilder
@@ -2052,3 +2077,84 @@ struct CreatePostSheet: View {
         }
         
     
+extension FullscreenMediaEditor {
+    @ViewBuilder private func editorCanvas(for item: CreatePostViewModel.MediaItem) -> some View {
+            if item.mime.hasPrefix("video/") {
+                ZStack {
+                    LocalVideoPlayer(data: item.data, autoPlay: true)
+                    if let basis = overlayBasisSize[item.id] {
+                        // Use the basis size from generated thumbnail to map overlays
+                        let dummy = UIImage(color: .black, size: basis) ?? UIImage()
+                        CaptionsOverlay(baseImage: dummy, items: captions[item.id] ?? [], onChange: { updated in captions[item.id] = updated }, selectedId: $selectedCaptionId)
+                        StickersOverlay(baseImage: dummy, items: stickers[item.id] ?? [], onChange: { updated in stickers[item.id] = updated }, selectedId: $selectedStickerId)
+                    }
+                }
+            } else if let ui = renderPreview(for: item) {
+                if cropMode {
+                    CropCanvas(image: ui, aspect: cropAspect, scale: $cropScale, offset: $cropOffset)
+                } else {
+                    ZStack {
+                        Image(uiImage: ui).resizable().scaledToFit()
+                        if vm.media.indices.contains(current), vm.media[current].id == item.id {
+                            CaptionsOverlay(
+                                baseImage: ui,
+                                items: captions[item.id] ?? [],
+                                onChange: { updated in captions[item.id] = updated },
+                                selectedId: $selectedCaptionId
+                            )
+                            StickersOverlay(
+                                baseImage: ui,
+                                items: stickers[item.id] ?? [],
+                                onChange: { updated in stickers[item.id] = updated },
+                                selectedId: $selectedStickerId
+                            )
+                        }
+                    }
+                }
+            } else {
+                RoundedRectangle(cornerRadius: 0).fill(Color.white.opacity(0.08))
+                    .overlay(Image(systemName: "play.circle.fill").font(.system(size: 60)).foregroundStyle(.white))
+            }
+        }
+
+        private struct LocalVideoPlayer: View {
+            let data: Data
+            var autoPlay: Bool = true
+            @State private var url: URL? = nil
+            @State private var player: AVPlayer? = nil
+            var body: some View {
+                ZStack {
+                    if let p = player {
+                        VideoPlayer(player: p).onAppear { if autoPlay { p.play() } }
+                    } else {
+                        Color.black.opacity(0.2)
+                    }
+                }
+                .onAppear {
+                    if url == nil {
+                        let tmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("lp_\(UUID().uuidString).mp4")
+                        try? data.write(to: tmp, options: .atomic)
+                        url = tmp
+                        player = AVPlayer(url: tmp)
+                        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { _ in
+                            player?.seek(to: .zero)
+                            if autoPlay { player?.play() }
+                        }
+                    }
+                }
+                .onDisappear { player?.pause() }
+            }
+        }
+}
+
+private extension UIImage {
+            convenience init?(color: UIColor, size: CGSize) {
+                UIGraphicsBeginImageContextWithOptions(size, true, 1)
+                guard let ctx = UIGraphicsGetCurrentContext() else { UIGraphicsEndImageContext(); return nil }
+                ctx.setFillColor(color.cgColor)
+                ctx.fill(CGRect(origin: .zero, size: size))
+                let img = UIGraphicsGetImageFromCurrentImageContext()
+                UIGraphicsEndImageContext()
+                if let cg = img?.cgImage { self.init(cgImage: cg) } else { return nil }
+            }
+        }
