@@ -13,12 +13,21 @@ struct WithdrawalsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                NavigationLink(destination: CreatorCreditsInfoView()) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "questionmark.circle")
+                        Text("What are creator credits?")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .tint(.blue)
+
                 // Available balance
                 if let p = profile {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Available Balance").font(.headline)
+                        Text("Available Credits").font(.headline)
                         HStack {
-                            Text("\(p.token_balance ?? 0) tokens").font(.title3.weight(.semibold))
+                            Text("\(p.token_balance ?? 0) credits").font(.title3.weight(.semibold))
                             Spacer()
                             let usd = Double(p.token_balance ?? 0) * WithdrawalsConfig.exchangeRates["USD"]!
                             Text("$\(String(format: "%.2f", usd))").foregroundStyle(.secondary)
@@ -35,8 +44,8 @@ struct WithdrawalsView: View {
 
                 // Request form
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Request Withdrawal").font(.headline)
-                    TextField("Amount (tokens)", text: $amountText)
+                    Text("Withdraw Credits").font(.headline)
+                    TextField("Amount (credits)", text: $amountText)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
                     Picker("Method", selection: $method) {
@@ -61,7 +70,7 @@ struct WithdrawalsView: View {
                 // History
                 VStack(alignment: .leading, spacing: 8) {
                     Text("History").font(.headline)
-                    if history.isEmpty { Text("No withdrawals yet").foregroundStyle(.secondary) }
+                    if history.isEmpty { Text("No credit withdrawals yet").foregroundStyle(.secondary) }
                     else {
                         ForEach(history) { w in
                             HStack(alignment: .top) {
@@ -84,7 +93,7 @@ struct WithdrawalsView: View {
             }
             .padding()
         }
-        .navigationTitle("Withdrawals")
+        .navigationTitle("Withdraw Credits")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
@@ -95,7 +104,7 @@ struct WithdrawalsView: View {
         let gross = w.converted_amount ?? Double(w.tokens) * w.exchange_rate
         let net = gross * 0.7
         let formatted = formatAmount(net, currency: currency)
-        return "\(w.tokens) tokens → \(currency) \(formatted)"
+        return "\(w.tokens) credits → \(currency) \(formatted)"
     }
 
     private func formatAmount(_ value: Double, currency: String) -> String {
@@ -157,8 +166,8 @@ struct WithdrawalsView: View {
         let minTokens = WithdrawalsConfig.minWithdrawalTokens
         let balance = profile?.token_balance ?? 0
         if tokens == 0 { return nil }
-        if tokens < minTokens { return "Minimum withdrawal is \(minTokens) tokens" }
-        if tokens > max(0, balance) { return "Cannot withdraw more than your balance (\(balance) tokens)" }
+        if tokens < minTokens { return "Minimum withdrawal is \(minTokens) credits" }
+        if tokens > max(0, balance) { return "Cannot withdraw more than your balance (\(balance) credits)" }
         let needsDetails = WithdrawalsConfig.mobileMoneyMethods.map { $0.lowercased() }.contains(method.lowercased())
         if needsDetails && paymentDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Enter your mobile money details" }
         return nil
@@ -168,7 +177,7 @@ struct WithdrawalsView: View {
         error = nil
         let tokens = Int(amountText.filter { $0.isNumber }) ?? 0
         let minTokens = WithdrawalsConfig.minWithdrawalTokens
-        guard tokens >= minTokens else { error = "Minimum withdrawal is \(minTokens) tokens"; return }
+        guard tokens >= minTokens else { error = "Minimum withdrawal is \(minTokens) credits"; return }
         let balance = profile?.token_balance ?? 0
         guard tokens <= max(0, balance) else { error = "Cannot withdraw more than your balance"; return }
         let needsDetails = WithdrawalsConfig.mobileMoneyMethods.map { $0.lowercased() }.contains(method.lowercased())

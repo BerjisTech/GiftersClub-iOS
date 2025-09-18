@@ -14,8 +14,9 @@ struct TokenTopUpSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Top up tokens").font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                // Simplify sheet: remove large titles/headers to avoid overlay
                 if let need = neededTokens {
                     Text("You need \(need) tokens to continue.")
                         .font(.subheadline)
@@ -29,43 +30,46 @@ struct TokenTopUpSheet: View {
                     Button("Reload") { Task { await sk.refreshProducts() } }
                         .buttonStyle(.bordered)
                 }
-                VStack(spacing: 8) {
-                    ForEach(sk.packs) { pack in
-                        Button(action: { Task { await buy(pack) } }) {
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    HStack(spacing: 8) {
-                                        Text("\(pack.tokens) tokens").font(.subheadline.weight(.semibold))
-                                        if isRecommended(pack: pack) { badge("Recommended") }
-                                        else if isBestValue(pack: pack) { badge("Best value") }
+                    VStack(spacing: 8) {
+                        ForEach(sk.packs) { pack in
+                            Button(action: { Task { await buy(pack) } }) {
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        HStack(spacing: 8) {
+                                            Text("\(pack.tokens) tokens").font(.subheadline.weight(.semibold))
+                                            if isRecommended(pack: pack) { badge("Recommended") }
+                                            else if isBestValue(pack: pack) { badge("Best value") }
+                                        }
+                                        if let name = pack.displayName { Text(name).font(.caption).foregroundStyle(.secondary) }
+                                        else { Text("Price pending").font(.caption).foregroundStyle(.secondary) }
+                                        if let need = neededTokens {
+                                            let leftover = max(pack.tokens - need, 0)
+                                            Text("Needs \(need), leftover \(leftover)")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
-                                    if let name = pack.displayName { Text(name).font(.caption).foregroundStyle(.secondary) }
-                                    else { Text("Price pending").font(.caption).foregroundStyle(.secondary) }
-                                    if let need = neededTokens {
-                                        let leftover = max(pack.tokens - need, 0)
-                                        Text("Needs \(need), leftover \(leftover)")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
+                                    Spacer()
+                                    Text(pack.displayPrice ?? "Unavailable")
+                                        .font(.subheadline.weight(.semibold))
                                 }
-                                Spacer()
-                                Text(pack.displayPrice ?? "Unavailable")
-                                    .font(.subheadline.weight(.semibold))
+                                .padding(12)
+                                .frame(maxWidth: .infinity)
+                                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
                             }
-                            .padding(12)
-                            .frame(maxWidth: .infinity)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
+                            .disabled(isProcessing || pack.product == nil)
                         }
-                        .disabled(isProcessing || pack.product == nil)
                     }
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
+                .padding()
             }
-            .padding()
-            .navigationTitle("Buy Tokens")
+            // Remove navigation title to prevent large overlaying title on iPad sheet
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { onCompleted?(false); dismiss() } } }
         }
-        .presentationDetents([.fraction(0.35), .medium])
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
         .alert("Payment Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorText ?? "") }
