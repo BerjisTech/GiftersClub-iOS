@@ -284,9 +284,7 @@ struct CreatePostSheet: View {
                     }
                 }
                 
-                TextField("Say something about your post...", text: $vm.caption, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(3, reservesSpace: true)
+                HashtagCaptionField(text: $vm.caption)
                 
                 Picker("Access", selection: $vm.accessType) {
                     ForEach(PostAccessType.allCases) { t in
@@ -349,7 +347,9 @@ struct CreatePostSheet: View {
                                 await MainActor.run { vm.publish { _ in
                                     banners.show(Banner(title: "Your post has been created", style: .success))
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                        // Close composer full-screen, then route to Profile
                                         NotificationCenter.default.post(name: .goHome, object: nil)
+                                        NotificationCenter.default.post(name: .gotoProfile, object: nil)
                                         dismiss()
                                     }
                                 } }
@@ -360,6 +360,8 @@ struct CreatePostSheet: View {
                     vm.publish { _ in
                         banners.show(Banner(title: "Post uploading in the background", style: .info))
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            // Close composer full-screen, then route to Profile
+                            NotificationCenter.default.post(name: .goHome, object: nil)
                             NotificationCenter.default.post(name: .gotoProfile, object: nil)
                             dismiss()
                         }
@@ -375,6 +377,79 @@ struct CreatePostSheet: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(vm.errorMessage ?? "")
+            }
+        }
+        // MARK: - Hashtag-aware caption input
+        private struct HashtagCaptionField: View {
+            @Binding var text: String
+            @State private var query: String = ""
+            @State private var suggestions: [(name: String, count: Int)] = []
+            @State private var isLoading = false
+            var body: some View {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Say something about your post...", text: $text, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(3, reservesSpace: true)
+                        .onChange(of: text) { _ in refreshQuery() }
+                    if !query.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                if isLoading { ProgressView().scaleEffect(0.8) }
+                                ForEach(Array(suggestions.enumerated()), id: \.offset) { _, item in
+                                    Button(action: { insertHashtag(item.name) }) {
+                                        HStack(spacing: 8) {
+                                            Text("#\(item.name)")
+                                                .lineLimit(1)
+                                                .truncationMode(.tail)
+                                                .frame(maxWidth: 140, alignment: .leading)
+                                            Text("\(item.count)")
+                                                .font(.system(.caption2, design: .monospaced))
+                                                .monospacedDigit()
+                                                .foregroundStyle(.secondary)
+                                                .frame(minWidth: 28, alignment: .trailing)
+                                        }
+                                        .frame(minWidth: 160)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            private func refreshQuery() {
+                guard let token = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).last, token.first == "#" else {
+                    query = ""; suggestions = []; return
+                }
+                let raw = String(token.dropFirst()).lowercased()
+                query = raw
+                guard !raw.isEmpty else { suggestions = []; return }
+                isLoading = true
+                Task {
+                    let rows = await SupabaseManager.shared.suggestTags(prefix: raw, limit: 8)
+                    await MainActor.run { self.suggestions = rows; self.isLoading = false }
+                }
+            }
+            private func insertHashtag(_ name: String) {
+                // Replace the trailing #token with the chosen one
+                var parts = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).map(String.init)
+                guard let last = parts.last, last.hasPrefix("#") else { return }
+                parts.removeLast()
+                parts.append("#\(name)")
+                // Rebuild preserving whitespace at end if any
+                let suffixWhitespace: String = {
+                    guard text.last?.isWhitespace == true else { return "" }
+                    var rev: [Character] = []
+                    for ch in text.reversed() {
+                        if ch.isWhitespace { rev.append(ch) } else { break }
+                    }
+                    return String(rev.reversed())
+                }()
+                text = parts.joined(separator: " ") + suffixWhitespace
+                query = ""; suggestions = []
             }
         }
         private func loadMyPlans() async {
@@ -625,6 +700,8 @@ struct CreatePostSheet: View {
         @State private var cropScale: CGFloat = 1.0
         @State private var cropOffset: CGSize = .zero
         @State private var cropAspect: CropAspect = .square
+        // For videos, keep track of duration to support timed overlays
+        @State private var videoDuration: [UUID: Double] = [:]
         // Captions per media id
         struct Caption: Identifiable, Equatable {
             let id: UUID
@@ -637,6 +714,9 @@ struct CreatePostSheet: View {
             var fontSize: CGFloat // in image points
             var outline: Bool
             var alignment: NSTextAlignment
+            // Optional timing for video overlays (seconds from start)
+            var start: Double? = nil
+            var end: Double? = nil
         }
         @State private var captions: [UUID: [Caption]] = [:]
         @State private var selectedCaptionId: UUID? = nil
@@ -649,6 +729,9 @@ struct CreatePostSheet: View {
             var center: CGPoint
             var scale: CGFloat
             var rotation: Angle
+            // Optional timing for video overlays (seconds from start)
+            var start: Double? = nil
+            var end: Double? = nil
         }
         @State private var stickers: [UUID: [Sticker]] = [:]
         @State private var selectedStickerId: UUID? = nil
@@ -685,7 +768,7 @@ struct CreatePostSheet: View {
                     ZStack(alignment: .bottom) {
                         Color.black.opacity(0.45).ignoresSafeArea()
                         VStack(alignment: .leading, spacing: 10) {
-                            CaptionEditorInline(caption: cap, onChange: { updated in updateCaption(updated) }, onDelete: { deleteCaption(sel) })
+                            CaptionEditorInline(caption: cap, videoLength: (currentMediaId().flatMap { videoDuration[$0] }), onChange: { updated in updateCaption(updated) }, onDelete: { deleteCaption(sel) })
                                 .padding(12)
                                 .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.65)))
                                 .padding(.horizontal)
@@ -693,6 +776,26 @@ struct CreatePostSheet: View {
                                 .padding(.horizontal)
                                 .padding(.bottom, 8)
                         }
+                    }
+                    .transition(.move(edge: .bottom))
+                }
+                // Sticker timing editor when a sticker is selected on a video
+                if let selS = selectedStickerId, let mid = currentMediaId(), let dur = videoDuration[mid], let st = (stickers[mid] ?? []).first(where: { $0.id == selS }) {
+                    ZStack(alignment: .bottom) {
+                        Color.black.opacity(0.45).ignoresSafeArea()
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Sticker Timing").font(.headline).foregroundStyle(.white)
+                            TimingControls(start: st.start, end: st.end, duration: dur) { newStart, newEnd in
+                                var arr = stickers[mid] ?? []
+                                if let idx = arr.firstIndex(where: { $0.id == st.id }) { arr[idx].start = newStart; arr[idx].end = newEnd }
+                                stickers[mid] = arr
+                            }
+                            HStack { Spacer(); Button("Done") { selectedStickerId = nil }.buttonStyle(.borderedProminent) }
+                        }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.65)))
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
                     }
                     .transition(.move(edge: .bottom))
                 }
@@ -767,7 +870,8 @@ struct CreatePostSheet: View {
                     onCaption: { addCaption() },
                     onStickers: { showStickerPicker = true },
                     onEffects: { cropMode = false },
-                    onMeme: { generateAIMeme() }
+                    onMeme: { generateAIMeme() },
+                    onCaptions: { autoGenerateCaptions() }
                 )
                 .padding(.trailing, 8)
                 .padding(.top, 40)
@@ -817,13 +921,13 @@ struct CreatePostSheet: View {
                             .padding(.horizontal)
                         }
                         HStack {
-                            Text("0%").foregroundStyle(.white.opacity(0.7)).font(.caption)
+                            Text("Min").foregroundStyle(.white.opacity(0.7)).font(.caption)
                             Slider(value: bindingForActive(), in: rangeForActive())
-                            Text("100%").foregroundStyle(.white.opacity(0.7)).font(.caption)
+                            Text("Max").foregroundStyle(.white.opacity(0.7)).font(.caption)
                         }
                         .padding(.horizontal)
                         HStack {
-                            Button("Reset") { resetCurrent() }
+                            Button("Reset Filters") { resetCurrent() }
                             Spacer()
                             Button("Apply to Image") { bakeCurrent() }
                         }
@@ -890,6 +994,39 @@ struct CreatePostSheet: View {
                         showMemeDialog = true
                     }
                     isAIMemeWorking = false
+                }
+            }
+            func autoGenerateCaptions() {
+                guard vm.media.indices.contains(current) else { return }
+                let item = vm.media[current]
+                guard item.mime.hasPrefix("video/") else { return }
+                isAIMemeWorking = true
+                Task {
+                    defer { isAIMemeWorking = false }
+                    if let segments = try? await SupabaseManager.shared.generateAutoCaptions(videoData: item.data) {
+                        let mid = item.id
+                        let base = overlayBasisSize[mid] ?? CGSize(width: 1080, height: 1920)
+                        var arr = captions[mid] ?? []
+                        for seg in segments {
+                            let y = base.height - max(28, base.height * 0.08)
+                            let cap = Caption(
+                                id: UUID(),
+                                text: seg.text,
+                                center: CGPoint(x: base.width/2, y: y),
+                                scale: 1.0,
+                                rotation: .degrees(0),
+                                color: .white,
+                                fontName: "HelveticaNeue-CondensedBlack",
+                                fontSize: max(22, min(40, min(base.width, base.height) * 0.045)),
+                                outline: true,
+                                alignment: .center,
+                                start: seg.start,
+                                end: seg.end
+                            )
+                            arr.append(cap)
+                        }
+                        captions[mid] = arr
+                    }
                 }
             }
             func addMeme(top: String?, bottom: String?) {
@@ -1036,6 +1173,7 @@ struct CreatePostSheet: View {
                 return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("gc_\(item.id).\(ext)")
             }
             
+            @MainActor
             func exportVideoWithOverlays(input: URL, basisSize: CGSize, captions: [Caption], stickers: [Sticker]) async -> URL? {
                 let asset = AVAsset(url: input)
                 let vTrackOpt: AVAssetTrack?
@@ -1048,7 +1186,7 @@ struct CreatePostSheet: View {
                     vTrackOpt = vTracks?.first
                     let aTracks = try? await asset.loadTracks(withMediaType: .audio)
                     aTrackOpt = aTracks?.first
-                    duration = (try? await asset.load(.duration)) ?? asset.duration
+                    duration = (try? await asset.load(.duration)) ?? .zero
                     natural = (try? await vTrackOpt?.load(.naturalSize)) ?? .zero
                     preferredTransform = (try? await vTrackOpt?.load(.preferredTransform)) ?? .identity
                 } else {
@@ -1094,6 +1232,7 @@ struct CreatePostSheet: View {
                     return CGPoint(x: origin.x + (p.x / from.width) * drawSize.width, y: origin.y + (p.y / from.height) * drawSize.height)
                 }
                 
+                let totalSeconds = max(0.01, CMTimeGetSeconds(duration))
                 for cap in captions {
                     let font = UIFont(name: cap.fontName, size: max(8, cap.fontSize)) ?? UIFont.systemFont(ofSize: max(8, cap.fontSize), weight: .bold)
                     let para = NSMutableParagraphStyle(); para.alignment = cap.alignment
@@ -1114,6 +1253,16 @@ struct CreatePostSheet: View {
                     layer.contentsScale = UIScreen.main.scale
                     layer.frame = CGRect(x: center.x - size.width/2, y: center.y - size.height/2, width: size.width, height: size.height)
                     layer.setAffineTransform(CGAffineTransform(rotationAngle: CGFloat(cap.rotation.radians)))
+                    if let s = cap.start, let e = cap.end, e > s {
+                        layer.opacity = 0
+                        let anim = CAKeyframeAnimation(keyPath: "opacity")
+                        anim.values = [0, 1, 1, 0]
+                        anim.keyTimes = [NSNumber(value: 0.0), NSNumber(value: max(0.0, s/totalSeconds)), NSNumber(value: min(1.0, e/totalSeconds)), NSNumber(value: 1.0)]
+                        anim.duration = totalSeconds
+                        anim.isRemovedOnCompletion = false
+                        anim.fillMode = .forwards
+                        layer.add(anim, forKey: "opacity")
+                    }
                     parent.addSublayer(layer)
                 }
                 for s in stickers {
@@ -1130,16 +1279,26 @@ struct CreatePostSheet: View {
                         layer.contents = ui
                         layer.frame = CGRect(x: center.x - w/2, y: center.y - h/2, width: w, height: h)
                         layer.setAffineTransform(CGAffineTransform(rotationAngle: CGFloat(s.rotation.radians)))
+                        if let st = s.start, let en = s.end, en > st {
+                            layer.opacity = 0
+                            let anim = CAKeyframeAnimation(keyPath: "opacity")
+                            anim.values = [0, 1, 1, 0]
+                            anim.keyTimes = [NSNumber(value: 0.0), NSNumber(value: max(0.0, st/totalSeconds)), NSNumber(value: min(1.0, en/totalSeconds)), NSNumber(value: 1.0)]
+                            anim.duration = totalSeconds
+                            anim.isRemovedOnCompletion = false
+                            anim.fillMode = .forwards
+                            layer.add(anim, forKey: "opacity")
+                        }
                         parent.addSublayer(layer)
                     }
                 }
                 videoComp.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parent)
                 let outURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("gc_out_\(UUID().uuidString).mp4")
-                guard let exporter = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHighestQuality) else { return nil }
-                exporter.outputURL = outURL
-                exporter.outputFileType = .mp4
-                exporter.videoComposition = videoComp
                 return await withCheckedContinuation { cont in
+                    guard let exporter = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHighestQuality) else { cont.resume(returning: nil); return }
+                    exporter.outputURL = outURL
+                    exporter.outputFileType = .mp4
+                    exporter.videoComposition = videoComp
                     exporter.exportAsynchronously {
                         cont.resume(returning: exporter.status == .completed ? outURL : nil)
                     }
@@ -1181,6 +1340,7 @@ struct CreatePostSheet: View {
             func resetCurrent() {
                 guard vm.media.indices.contains(current) else { return }
                 params[vm.media[current].id] = FilterParams()
+                cropScale = 1.0; cropOffset = .zero
                 updatePreview()
             }
             func bakeCurrent() {
@@ -1244,6 +1404,18 @@ struct CreatePostSheet: View {
                     let url = tempURL(for: item)
                     do { try item.data.write(to: url, options: .atomic) } catch { return nil }
                     let asset = AVAsset(url: url)
+                    if #available(iOS 16.0, *) {
+                        Task {
+                            let d = try? await asset.load(.duration)
+                            let secs = CMTimeGetSeconds(d ?? .zero)
+                            if secs.isFinite {
+                                await MainActor.run { videoDuration[item.id] = secs }
+                            }
+                        }
+                    } else {
+                        let secs = CMTimeGetSeconds(asset.duration)
+                        if secs.isFinite { videoDuration[item.id] = secs }
+                    }
                     let gen = AVAssetImageGenerator(asset: asset)
                     gen.appliesPreferredTrackTransform = true
                     if let cg = try? gen.copyCGImage(at: .zero, actualTime: nil) {
@@ -1297,6 +1469,7 @@ struct CreatePostSheet: View {
             var onStickers: () -> Void
             var onEffects: () -> Void
             var onMeme: () -> Void
+            var onCaptions: () -> Void
             @State private var expanded = false
             var body: some View {
                 VStack(spacing: 12) {
@@ -1313,6 +1486,7 @@ struct CreatePostSheet: View {
                     railButton(icon: "face.smiling", label: "Stickers", action: onStickers, expanded: expanded)
                     railButton(icon: "wand.and.stars", label: "Effects", action: onEffects, expanded: expanded)
                     railButton(icon: "text.bubble", label: "AI Meme", action: onMeme, expanded: expanded)
+                    railButton(icon: "captions.bubble.fill", label: "Auto CC", action: onCaptions, expanded: expanded)
                     Spacer()
                 }
             }
@@ -1604,6 +1778,7 @@ struct CreatePostSheet: View {
         
         private struct CaptionEditorInline: View {
             @State var caption: FullscreenMediaEditor.Caption
+            var videoLength: Double? = nil
             var onChange: (FullscreenMediaEditor.Caption) -> Void
             var onDelete: () -> Void
             private let colors: [Color] = [.white, .black, .yellow, .red, .blue, .green, .orange, .purple, .pink]
@@ -1616,6 +1791,11 @@ struct CreatePostSheet: View {
                             .tint(caption.color)
                             .textFieldStyle(.roundedBorder)
                         Button(role: .destructive) { onDelete() } label: { Image(systemName: "trash").foregroundStyle(.red) }
+                    }
+                    if let dur = videoLength {
+                        TimingControls(start: caption.start, end: caption.end, duration: dur) { s, e in
+                            caption.start = s; caption.end = e; onChange(caption)
+                        }
                     }
                     // Colors
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -1659,6 +1839,30 @@ struct CreatePostSheet: View {
                     }
                 }
                 .foregroundStyle(.white)
+            }
+        }
+
+        // Reusable timing controls for video overlays
+        private struct TimingControls: View {
+            @State var start: Double?
+            @State var end: Double?
+            let duration: Double
+            var onUpdate: (Double?, Double?) -> Void
+            var body: some View {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Timing").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                    HStack {
+                        Text("Start")
+                        Slider(value: Binding(get: { start ?? 0 }, set: { newVal in start = min(newVal, (end ?? duration)); onUpdate(start, end) }), in: 0...duration)
+                        Text("\(Int(start ?? 0))s").frame(width: 40, alignment: .trailing)
+                    }
+                    HStack {
+                        Text("End  ")
+                        Slider(value: Binding(get: { end ?? duration }, set: { newVal in end = max(newVal, (start ?? 0)); onUpdate(start, end) }), in: 0...duration)
+                        Text("\(Int(end ?? duration))s").frame(width: 40, alignment: .trailing)
+                    }
+                    Text("Leave blank for full clip").font(.caption2).foregroundStyle(.white.opacity(0.7))
+                }
             }
         }
         

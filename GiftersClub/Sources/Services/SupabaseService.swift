@@ -617,6 +617,40 @@ final class SupabaseManager: ObservableObject {
         // Edge function may attach an ephemeral LiveKit token for host/viewer
         let token: String?
     }
+
+    // MARK: - Tags / Hashtags
+    struct DBTag: Decodable, Identifiable { let id: String; let name: String }
+    /// Suggest hashtags by prefix from `tags` table. No admin RPCs in the user app.
+    /// Also enriches with local counts from `post_tags` for the returned tag ids.
+    func suggestTags(prefix: String, limit: Int = 8) async -> [(name: String, count: Int)] {
+        let q = prefix.lowercased()
+        struct TagRow: Decodable { let id: String; let name: String }
+        do {
+            let tagRes: PostgrestResponse<[TagRow]> = try await client
+                .from("tags")
+                .select("id,name")
+                .ilike("name", pattern: "\(q)%")
+                .order("name")
+                .limit(limit)
+                .execute()
+            let tags = tagRes.value
+            guard !tags.isEmpty else { return [] }
+            // Fetch post_tags rows for returned tag ids and count locally
+            struct MapRow: Decodable { let tag_id: String }
+            let ids = tags.map { $0.id }
+            let mapRes: PostgrestResponse<[MapRow]> = try await client
+                .from("post_tags")
+                .select("tag_id")
+                .in("tag_id", values: ids)
+                .limit(5000)
+                .execute()
+            var freq: [String: Int] = [:]
+            for r in mapRes.value { freq[r.tag_id, default: 0] += 1 }
+            return tags.map { ($0.name, freq[$0.id] ?? 0) }
+        } catch {
+            return []
+        }
+    }
     /// Create a scheduled live stream row directly (status = scheduled)
     func createScheduledLiveStream(
         title: String,
@@ -1437,6 +1471,26 @@ final class SupabaseManager: ObservableObject {
         let (respData, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
         return try? JSONDecoder().decode(MemeRes.self, from: respData)
+    }
+
+    // MARK: - Auto captions via Edge Function
+    struct CaptionSegment: Decodable { let start: Double; let end: Double; let text: String }
+    func generateAutoCaptions(videoData: Data) async throws -> [CaptionSegment]? {
+        // NOTE: For large files consider presigning+upload then passing URL instead
+        let b64 = videoData.base64EncodedString()
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/auto-captions")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken {
+            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["video_base64": b64, "format": "segments"]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (respData, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
+        return try? JSONDecoder().decode([CaptionSegment].self, from: respData)
     }
 
     struct InsertComment: Encodable { let post_id: String; let user_id: String; let content: String; let parent_comment_id: String? }
