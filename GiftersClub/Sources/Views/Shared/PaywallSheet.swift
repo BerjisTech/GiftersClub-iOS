@@ -58,6 +58,7 @@ struct PaywallSheet: View {
             }
             .padding()
             .navigationTitle("Locked Content")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
         }
         .task {
@@ -90,7 +91,7 @@ struct PaywallSheet: View {
         }) {
             TokenTopUpSheet(onCompleted: { success in topUpSucceeded = success })
         }
-        .presentationDetents([.fraction(0.45), .medium])
+        .presentationDetents([.medium, .large])
         .alert("Payment Error", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorText ?? "") }

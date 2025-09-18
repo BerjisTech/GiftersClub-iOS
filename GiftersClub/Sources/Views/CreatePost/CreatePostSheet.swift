@@ -700,6 +700,7 @@ struct CreatePostSheet: View {
         @State private var cropScale: CGFloat = 1.0
         @State private var cropOffset: CGSize = .zero
         @State private var cropAspect: CropAspect = .square
+        @State private var controlsExpanded: Bool = false
         // For videos, keep track of duration to support timed overlays
         @State private var videoDuration: [UUID: Double] = [:]
         // Captions per media id
@@ -749,11 +750,8 @@ struct CreatePostSheet: View {
         var body: some View {
             ZStack {
                 Color.black.ignoresSafeArea()
-                VStack(spacing: 0) {
-                    headerBar
-                    mediaPagerView
-                    controlsView
-                }
+                // Center content fills the screen; chrome is inset to edges
+                mediaPagerView
                 // Busy overlay for AI meme
                 if isAIMemeWorking {
                     ZStack {
@@ -800,6 +798,32 @@ struct CreatePostSheet: View {
                     .transition(.move(edge: .bottom))
                 }
             }
+            // Pin header to the top safe area
+            .safeAreaInset(edge: .top) {
+                headerBar
+                    .background(.ultraThinMaterial)
+            }
+            // Pin controls to the bottom with collapsible panel
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 6) {
+                    Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 36, height: 5)
+                        .padding(.top, 4)
+                        .onTapGesture { withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { controlsExpanded.toggle() } }
+                    if controlsExpanded {
+                        controlsView
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .frame(maxHeight: idealExpandedHeight)
+                    } else {
+                        collapsedControlsView
+                            .transition(.opacity)
+                    }
+                }
+                .padding(.bottom, 8)
+                .background(.ultraThinMaterial)
+            }
+            // Sheet presenters owned by the editor, not the controls subview
+            .sheet(isPresented: $showStickerPicker) { StickerPickerView(onPick: { name, data in addSticker(named: name, data: data); showStickerPicker = false }) }
+            .sheet(isPresented: $showMemeDialog) { MemePromptSheet(onAdd: { top, bottom in addMeme(top: top, bottom: bottom); showMemeDialog = false }) }
         }
 
         // MARK: - Subviews (split to speed up type checking)
@@ -822,7 +846,6 @@ struct CreatePostSheet: View {
             .foregroundStyle(.white)
             .padding(.horizontal)
             .padding(.vertical, 8)
-            .background(Color.black.opacity(0.3))
         }
 
         @ViewBuilder private var mediaPagerView: some View {
@@ -938,9 +961,66 @@ struct CreatePostSheet: View {
                     }
                 }
             }
-            .background(Color.black.opacity(0.3))
-            .sheet(isPresented: $showStickerPicker) { StickerPickerView(onPick: { name, data in addSticker(named: name, data: data); showStickerPicker = false }) }
-            .sheet(isPresented: $showMemeDialog) { MemePromptSheet(onAdd: { top, bottom in addMeme(top: top, bottom: bottom); showMemeDialog = false }) }
+        }
+
+        // Collapsed, compact version of controls: only the chips and a quick action
+        @ViewBuilder private var collapsedControlsView: some View {
+            VStack(spacing: 8) {
+                if cropMode {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(CropAspect.allCases, id: \.self) { a in
+                                Text(a.rawValue)
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(cropAspect == a ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
+                                    .clipShape(Capsule())
+                                    .onTapGesture { cropAspect = a }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    HStack {
+                        Button("Reset") { cropScale = 1.0; cropOffset = .zero }
+                        Spacer()
+                        Button("Apply") { applyCrop() }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(Control.allCases, id: \.self) { c in
+                                Text(c.rawValue)
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(activeControl == c ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
+                                    .clipShape(Capsule())
+                                    .onTapGesture { activeControl = c }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+                Button(action: { withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { controlsExpanded = true } }) {
+                    Text("Expand").font(.caption.weight(.semibold))
+                }
+            }
+        }
+
+        // Heuristic height for expanded panel; shorter on compact devices
+        private var idealExpandedHeight: CGFloat {
+            #if os(iOS)
+            let h = UIScreen.main.bounds.height
+            if h < 700 { return 220 }
+            if h < 820 { return 260 }
+            return 300
+            #else
+            return 260
+            #endif
         }
             
             func currentMediaId() -> UUID? { vm.media.indices.contains(current) ? vm.media[current].id : nil }
