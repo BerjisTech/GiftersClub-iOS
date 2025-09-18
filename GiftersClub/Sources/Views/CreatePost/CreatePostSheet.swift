@@ -98,7 +98,11 @@ struct CreatePostSheet: View {
                 BannerHost().environmentObject(banners)
             }
             .navigationTitle(title)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
+            .toolbar {
+                if step != .edit {
+                    ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } }
+                }
+            }
         }
         .presentationDetents([.large])
         // If user picked media from the library, auto-advance to Edit step when media becomes available
@@ -761,22 +765,7 @@ struct CreatePostSheet: View {
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.6)))
                     }
                 }
-                // Caption editor full-screen panel
-                if let sel = selectedCaptionId, let mid = currentMediaId(), let cap = (captions[mid] ?? []).first(where: { $0.id == sel }) {
-                    ZStack(alignment: .bottom) {
-                        Color.black.opacity(0.45).ignoresSafeArea()
-                        VStack(alignment: .leading, spacing: 10) {
-                            CaptionEditorInline(caption: cap, videoLength: (currentMediaId().flatMap { videoDuration[$0] }), onChange: { updated in updateCaption(updated) }, onDelete: { deleteCaption(sel) })
-                                .padding(12)
-                                .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.65)))
-                                .padding(.horizontal)
-                            HStack { Spacer(); Button("Done") { selectedCaptionId = nil }.buttonStyle(.borderedProminent) }
-                                .padding(.horizontal)
-                                .padding(.bottom, 8)
-                        }
-                    }
-                    .transition(.move(edge: .bottom))
-                }
+                // Caption editor now appears in the bottomBar safe area inset (not floating)
                 // Sticker timing editor when a sticker is selected on a video
                 if let selS = selectedStickerId, let mid = currentMediaId(), let dur = videoDuration[mid], let st = (stickers[mid] ?? []).first(where: { $0.id == selS }) {
                     ZStack(alignment: .bottom) {
@@ -803,24 +792,8 @@ struct CreatePostSheet: View {
                 headerBar
                     .background(.ultraThinMaterial)
             }
-            // Pin controls to the bottom with collapsible panel
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 6) {
-                    Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 36, height: 5)
-                        .padding(.top, 4)
-                        .onTapGesture { withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { controlsExpanded.toggle() } }
-                    if controlsExpanded {
-                        controlsView
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                            .frame(maxHeight: idealExpandedHeight)
-                    } else {
-                        collapsedControlsView
-                            .transition(.opacity)
-                    }
-                }
-                .padding(.bottom, 8)
-                .background(.ultraThinMaterial)
-            }
+            // Bottom chrome: caption editor panel OR controls (mutually exclusive)
+            .safeAreaInset(edge: .bottom) { bottomBar }
             // Sheet presenters owned by the editor, not the controls subview
             .sheet(isPresented: $showStickerPicker) { StickerPickerView(onPick: { name, data in addSticker(named: name, data: data); showStickerPicker = false }) }
             .sheet(isPresented: $showMemeDialog) { MemePromptSheet(onAdd: { top, bottom in addMeme(top: top, bottom: bottom); showMemeDialog = false }) }
@@ -960,6 +933,45 @@ struct CreatePostSheet: View {
                         .padding(.bottom, 8)
                     }
                 }
+            }
+        }
+
+        // Bottom bar switches between caption editor and controls
+        @ViewBuilder private var bottomBar: some View {
+            if let mid = currentMediaId(), let sel = selectedCaptionId, let cap = (captions[mid] ?? []).first(where: { $0.id == sel }) {
+                // Caption editor anchored at bottom
+                VStack(alignment: .leading, spacing: 10) {
+                    CaptionEditorInline(caption: cap, videoLength: (videoDuration[mid]), onChange: { updated in updateCaption(updated) }, onDelete: { deleteCaption(sel) })
+                        .padding(.horizontal)
+                    HStack {
+                        Spacer()
+                        Button("Done") { selectedCaptionId = nil }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.top, 6)
+                .padding(.bottom, 8)
+                .background(.ultraThinMaterial)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                VStack(spacing: 6) {
+                    Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 36, height: 5)
+                        .padding(.top, 4)
+                        .onTapGesture { withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { controlsExpanded.toggle() } }
+                    if controlsExpanded {
+                        controlsView
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .frame(maxHeight: idealExpandedHeight)
+                        HStack { Spacer(); Button { withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { controlsExpanded = false } } label: { Image(systemName: "chevron.down").font(.subheadline.weight(.semibold)) } .tint(.white.opacity(0.9)) .padding(.trailing) }
+                    } else {
+                        collapsedControlsView
+                            .transition(.opacity)
+                        HStack { Spacer(); Button { withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { controlsExpanded = true } } label: { Image(systemName: "chevron.up").font(.subheadline.weight(.semibold)) } .tint(.white.opacity(0.9)) .padding(.trailing) }
+                    }
+                }
+                .padding(.bottom, 8)
+                .background(.ultraThinMaterial)
             }
         }
 
