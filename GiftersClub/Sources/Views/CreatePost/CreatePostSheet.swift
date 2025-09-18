@@ -97,7 +97,9 @@ struct CreatePostSheet: View {
                 content
                 BannerHost().environmentObject(banners)
             }
-            .navigationTitle(title)
+            .navigationTitle(step == .edit ? "" : title)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(step == .edit)
             .toolbar {
                 if step != .edit {
                     ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } }
@@ -1677,7 +1679,7 @@ struct CreatePostSheet: View {
             @State private var localRotation: Angle = .degrees(0)
             @State private var localOffset: CGSize = .zero
             var body: some View {
-                let mapped = mapPoint(sticker.center, from: imageSize, to: viewSize)
+                let mapped = mapImageToView(sticker.center, image: imageSize, in: viewSize)
                 let ui: UIImage? = {
                     if let d = sticker.imageData { return UIImage(data: d) }
                     return nil
@@ -1708,7 +1710,7 @@ struct CreatePostSheet: View {
                         SimultaneousGesture(
                             DragGesture().onChanged { v in localOffset = v.translation }.onEnded { _ in
                                 var updated = sticker
-                                updated.center = mapPoint(CGPoint(x: mapped.x + localOffset.width, y: mapped.y + localOffset.height), from: viewSize, to: imageSize)
+                                updated.center = mapViewToImage(CGPoint(x: mapped.x + localOffset.width, y: mapped.y + localOffset.height), image: imageSize, in: viewSize)
                                 localOffset = .zero
                                 onUpdate(updated)
                             },
@@ -1719,13 +1721,27 @@ struct CreatePostSheet: View {
                         )
                     )
             }
-            private func mapPoint(_ p: CGPoint, from: CGSize, to: CGSize) -> CGPoint {
-                let imageAspect = from.width / from.height
-                let viewAspect = to.width / to.height
+            private func contentRect(image: CGSize, in view: CGSize) -> CGRect {
+                let imageAspect = image.width / image.height
+                let viewAspect = view.width / view.height
                 var drawSize: CGSize
-                if imageAspect > viewAspect { drawSize = CGSize(width: to.width, height: to.width / imageAspect) } else { drawSize = CGSize(width: to.height * imageAspect, height: to.height) }
-                let origin = CGPoint(x: (to.width - drawSize.width)/2, y: (to.height - drawSize.height)/2)
-                return CGPoint(x: origin.x + (p.x / from.width) * drawSize.width, y: origin.y + (p.y / from.height) * drawSize.height)
+                if imageAspect > viewAspect { drawSize = CGSize(width: view.width, height: view.width / imageAspect) }
+                else { drawSize = CGSize(width: view.height * imageAspect, height: view.height) }
+                let origin = CGPoint(x: (view.width - drawSize.width)/2, y: (view.height - drawSize.height)/2)
+                return CGRect(origin: origin, size: drawSize)
+            }
+            private func mapImageToView(_ p: CGPoint, image: CGSize, in view: CGSize) -> CGPoint {
+                let rect = contentRect(image: image, in: view)
+                return CGPoint(x: rect.origin.x + (p.x / image.width) * rect.size.width,
+                               y: rect.origin.y + (p.y / image.height) * rect.size.height)
+            }
+            private func mapViewToImage(_ q: CGPoint, image: CGSize, in view: CGSize) -> CGPoint {
+                let rect = contentRect(image: image, in: view)
+                let dx = q.x - rect.origin.x
+                let dy = q.y - rect.origin.y
+                let nx = max(0, min(rect.size.width, dx)) / rect.size.width
+                let ny = max(0, min(rect.size.height, dy)) / rect.size.height
+                return CGPoint(x: nx * image.width, y: ny * image.height)
             }
         }
         
