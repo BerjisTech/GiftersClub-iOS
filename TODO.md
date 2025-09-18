@@ -92,3 +92,169 @@ Acceptance checklist before marking “Yes” in App Store Connect:
   - users are requesting option to set duration that a sticker/meme/sticker stays when the media being edited is video
   - Some users are requesting autocaptions
   - Users are also requesting hashtag suggestion, ie in the details section when they type #followed by something a typeahead and a scrollable list of hashtags options based on what they've alread typed including number of times the hastag has beed used is displayed and they can tap on an option and it can be used in the description. For hashtag details check the angular project for interface.ts/interfaces.ts and migration files to see how hashtags were set up on the app
+
+
+
+
+
+  iOS Submission
+Unresolved Issues
+
+Your app version was rejected and no other items submitted can be accepted or approved. You can make edits to your app version below.
+
+Items Submitted (1)
+You can review and make edits to your items below, or communicate with Apple. Accepted items won't be available for release until all items with issues are resubmitted and accepted. You can also remove those items and resubmit them later.
+Item
+Type
+Review Status
+Action
+iOS App 1.0
+
+1.0.9 (9)
+
+App Version
+Rejected
+2.1.0 Performance: App Completeness
+
+3.0.0 Business: Preamble
+
+3.1.1 Business: Payments - In-App Purchase
+
+4.0.0 Design: Preamble
+
+4.1.0 Design: Copycats
+
+0a4134e31478f0d260ac459a060c29876ee3afde.pngDownload
+Screenshot-0918-181252.pngDownload
+Screenshot-0918-181304.pngDownload
+Screenshot-0918-181322.pngDownload
+Edit
+
+Messages (1)
+
+App ReviewToday 1:21 PM
+Hello,
+
+Thank you for your efforts to follow our guidelines. There are still some issues that need your attention.
+
+If you have any questions, we are here to help. Reply to this message in App Store Connect and let us know.
+
+Review Environment
+
+Submission ID: 8a130c58-056d-498c-9cb9-cbf550078713
+Review date: September 18, 2025
+Version reviewed: 1.0
+
+
+Guideline 4.1 - Design - Copycats
+
+The app or its metadata appears to contain potentially misleading references to third-party content.
+
+Specifically, the app includes content that resembles Deathstroke without the necessary authorization.
+
+Next Steps
+
+If you have the necessary rights to distribute an app with this third-party content, attach documentary evidence in the App Review Information section in App Store Connect and reply to this message. 
+
+If you do not have the necessary rights to the third-party content, It would be appropriate to revise the app and metadata to remove the third-party content before resubmitting for review. 
+
+Resources
+
+Learn more about requirements to prevent apps from impersonating other apps or services in guideline 4.1.
+
+
+Guideline 4.0 - Design
+
+Parts of the app's user interface were crowded, laid out, or displayed in a way that made it difficult to use the app when reviewed on iPad Air (5th generation) running iPadOS 26.0.
+
+Next Steps
+
+To resolve this issue, revise the app to ensure that the content and controls on the screen are easy to read and interact with.
+
+Note that users expect apps they download to function on all the devices where they are available. Since your app may be downloaded onto iPad devices, it is important that it also function as expected for iPad users. 
+
+Resources
+
+- Learn foundational design principles from Apple designers and the developer community.
+- Learn more about designing for iOS in the Human Interface Guidelines.
+- See documentation for the UIKit framework.
+- Learn more about design requirements in guideline 4.
+
+
+Guideline 2.1 - Performance - App Completeness
+Issue Description
+
+The app exhibited one or more bugs that would negatively impact users.
+
+Bug description: we were unable to top up tokens because all the option were not responsive when tapped on it.
+
+Review device details:
+
+- Device type: iPad Air (5th generation) 
+- OS version: iPadOS 26.0
+
+Next Steps
+
+Test the app on supported devices to identify and resolve bugs and stability issues before submitting for review.
+
+If the bug cannot be reproduced, try the following:
+
+- For new apps, uninstall all previous versions of the app from a device, then install and follow the steps to reproduce.
+- For app updates, install the new version as an update to the previous version, then follow the steps to reproduce.
+
+Resources
+
+- For information about testing apps and preparing them for review, see Testing a Release Build.
+- To learn about troubleshooting networking issues, see Networking Overview.
+
+
+Guideline 3.1.1 - Business - Payments - In-App Purchase
+
+We noticed your app includes a mechanism that allows users to exchange in-app purchases for money. 
+
+This is not an appropriate use of in-app purchase, since in-app purchase is designed to provide a consistent and safe experience for purchasing digital content within apps.
+
+Next Steps
+
+To resolve this issue, please remove any features or services that allow users to exchange in-app purchases for money.
+
+Resources 
+
+Learn more about appropriate uses for in-app purchase in App Review Guideline 3.1.1.
+
+
+Guideline 3.0 - Business
+
+We began our review, but we are unable to continue because we need additional information about your app.
+
+Specifically, can you confirm that $110.99 USD, $279.00 USD, $559.00 USD, $1000.00 USD is the intended price of your in-app purchase product, token_10000, token_25000, token_50000, and token_90000? 
+
+Once we receive your confirmation, we will continue our review. If there's additional information you'd like to provide, please include it in your response to this message in App Store Connect.
+
+
+Guideline 2.1 - Information Needed
+
+We need more information to continue the review.
+
+Next Steps
+
+Provide detailed answers to the following questions:
+
+1. What is the purpose of tokens in the app?
+
+Support
+- Reply to this message in your preferred language if you need assistance. If you need additional support, use the Contact Us module.
+- Consult with fellow developers and Apple engineers on the Apple Developer Forums.
+- Request an App Review Appointment at Meet with Apple to discuss your app's review. Appointments subject to availability during your local business hours on Tuesdays and Thursdays.
+- Provide feedback on this message and your review experience by completing a short survey.
+Reply to App Review
+
+Date Submitted
+Sep 16, 2025 at 6:39 PM
+Submission ID
+8a130c58-056d-498c-9cb9-cbf550078713
+Submitted By
+Fridah Nancy
+Last Updated By
+Apple
+Cancel Submission

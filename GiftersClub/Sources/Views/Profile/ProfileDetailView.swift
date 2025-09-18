@@ -56,6 +56,7 @@ struct ProfileDetailView: View {
                         }
                     }
                 }
+                .refreshable { await loadAll() }
                 .toolbar { toolbar }
             }
             .navigationTitle("")
@@ -79,7 +80,6 @@ struct ProfileDetailView: View {
                     ))
                 }
             }
-            .refreshable { await loadAll() }
         }
     }
 

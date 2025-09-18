@@ -151,26 +151,68 @@ private struct AutoPlayVideo: View {
     var play: Bool
     @State private var player: AVPlayer? = nil
     @State private var endObserver: NSObjectProtocol? = nil
+    @State private var statusObserver: NSKeyValueObservation? = nil
+    @State private var showErrorOverlay = false
+    @State private var isBuffering = true
     var body: some View {
-        VideoPlayer(player: player)
-            .onAppear {
-                if player == nil { player = AVPlayer(url: url) }
-                // Loop on end
-                if let p = player, endObserver == nil {
-                    endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main) { _ in
-                        p.seek(to: .zero)
-                        if play { p.play() }
+        ZStack(alignment: .center) {
+            VideoPlayer(player: player)
+                .ignoresSafeArea()
+            if isBuffering { BlinkingLoadingBar() }
+            if showErrorOverlay {
+                VStack(spacing: 8) {
+                    Image(systemName: "play.slash.fill").font(.largeTitle).foregroundStyle(.white)
+                    Text("Can’t play this video").foregroundStyle(.white)
+                    HStack(spacing: 12) {
+                        Button("Retry") { rebuildPlayer() }.buttonStyle(.borderedProminent)
+                        Button("Open") { UIApplication.shared.open(url) }.buttonStyle(.bordered)
                     }
                 }
-                if play { player?.play() }
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
-            .onChange(of: play, perform: { p in if p { player?.play() } else { player?.pause() } })
-            .onDisappear {
-                player?.pause()
-                if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
-                endObserver = nil
+        }
+        .onAppear {
+            rebuildPlayer()
+        }
+        .onChange(of: play, perform: { p in if p { player?.play() } else { player?.pause() } })
+        .onDisappear {
+            player?.pause()
+            if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
+            endObserver = nil
+            statusObserver?.invalidate(); statusObserver = nil
+        }
+    }
+
+    private func rebuildPlayer() {
+        isBuffering = true
+        showErrorOverlay = false
+        let asset = AVURLAsset(url: url)
+        let item = AVPlayerItem(asset: asset)
+        if player == nil { player = AVPlayer() }
+        player?.automaticallyWaitsToMinimizeStalling = true
+        player?.replaceCurrentItem(with: item)
+        // Loop on end
+        if let p = player, endObserver == nil {
+            endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main) { _ in
+                p.seek(to: .zero)
+                if play { p.play() }
             }
-            .ignoresSafeArea()
+        }
+        statusObserver?.invalidate(); statusObserver = nil
+        statusObserver = item.observe(\.status, options: [.new]) { it, _ in
+            DispatchQueue.main.async {
+                switch it.status {
+                case .readyToPlay:
+                    isBuffering = false
+                    if play { player?.play() }
+                case .failed:
+                    isBuffering = false
+                    showErrorOverlay = true
+                default: break
+                }
+            }
+        }
     }
 }
 

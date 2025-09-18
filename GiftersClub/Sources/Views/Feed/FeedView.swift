@@ -838,12 +838,21 @@ private struct VideoBackgroundView: View {
     @State private var timeObserver: Any? = nil
     @State private var showLoadingBar: Bool = true
     @State private var statusObserver: NSKeyValueObservation? = nil
+    @State private var showErrorOverlay = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
             VideoPlayer(player: player)
                 .ignoresSafeArea()
             if showLoadingBar { BlinkingLoadingBar() }
+            if showErrorOverlay {
+                VStack(spacing: 8) {
+                    Image(systemName: "play.slash.fill").font(.title).foregroundStyle(.white)
+                    Text("Can’t play this video").foregroundStyle(.white)
+                }
+                .padding(10)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            }
         }
         .onAppear {
                 if player == nil { player = AVPlayer(url: url) }
@@ -859,7 +868,8 @@ private struct VideoBackgroundView: View {
                     // Also hide when item becomes ready (even if not playing)
                     if let item = p.currentItem {
                         statusObserver = item.observe(\.status, options: [.new]) { it, _ in
-                            if it.status == .readyToPlay { showLoadingBar = false }
+                            if it.status == .readyToPlay { showLoadingBar = false; showErrorOverlay = false }
+                            if it.status == .failed { showLoadingBar = false; showErrorOverlay = true }
                         }
                     }
                 }
