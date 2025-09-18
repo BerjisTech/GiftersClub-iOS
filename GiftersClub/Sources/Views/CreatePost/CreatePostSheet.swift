@@ -276,10 +276,14 @@ struct CreatePostSheet: View {
                 var username: String = supa.user?.email ?? "you"
                 var name: String? = nil
                 var avatarURL: URL? = nil
-                if let me = supa.user?.id.uuidString, let prof = try? await supa.fetchProfile(username: nil, userId: me) {
-                    username = prof?.username.isEmpty == false ? (prof?.username ?? username) : username
-                    name = prof?.name
-                    if let img = prof?.image, let u = URL(string: img) { avatarURL = u }
+                if let me = supa.user?.id.uuidString {
+                    let profOpt: SupabaseManager.DBProfile? = try? await supa.fetchProfile(username: nil, userId: me)
+                    if let prof = profOpt {
+                        let u = prof.username.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !u.isEmpty { username = u }
+                        name = prof.name
+                        if let img = prof.image, let url = URL(string: img) { avatarURL = url }
+                    }
                 }
                 await MainActor.run {
                     previewModel = PostViewerModel(
