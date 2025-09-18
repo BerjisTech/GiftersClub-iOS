@@ -1374,7 +1374,7 @@ struct CreatePostSheet: View {
                 }
                 videoComp.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parent)
                 let outURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("gc_out_\(UUID().uuidString).mp4")
-                return await withCheckedContinuation { cont in
+                return await withUnsafeContinuation { cont in
                     guard let exporter = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHighestQuality) else { cont.resume(returning: nil); return }
                     exporter.outputURL = outURL
                     exporter.outputFileType = .mp4

@@ -886,6 +886,8 @@ private struct VideoBackgroundView: View {
                 statusObserver?.invalidate(); statusObserver = nil
             }
     }
+
+    // No HEAD probing; rely on AVFoundation
 }
 
 private struct AsyncAvatar: View {

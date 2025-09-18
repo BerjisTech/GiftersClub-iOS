@@ -214,6 +214,8 @@ private struct AutoPlayVideo: View {
             }
         }
     }
+
+    // No HEAD/MIME probing; rely on AVFoundation to determine format.
 }
 
 private struct ZoomableAsyncImage: View {

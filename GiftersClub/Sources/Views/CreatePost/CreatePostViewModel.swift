@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import PhotosUI
+import AVFoundation
 
 enum PostAccessType: String, CaseIterable, Identifiable {
     case free
@@ -52,9 +53,20 @@ final class CreatePostViewModel: ObservableObject {
             for item in selectedPickerItems {
                 if let data = try? await item.loadTransferable(type: Data.self) {
                     let utType = item.supportedContentTypes.first
-                    let mime = utType?.preferredMIMEType ?? "application/octet-stream"
-                    let kind: MediaItem.Kind = (mime.hasPrefix("video/")) ? .video : .photo
-                    tmp.append(MediaItem(data: data, mime: mime, kind: kind))
+                    let initialMime = utType?.preferredMIMEType ?? "application/octet-stream"
+                    let isVideo = initialMime.hasPrefix("video/")
+                    if isVideo && initialMime != "video/mp4" {
+                        // Transcode locally to MP4 (H.264/AAC) for maximum iOS compatibility
+                        if let mp4 = await transcodeToMP4(data: data, suggestedType: utType) {
+                            tmp.append(MediaItem(data: mp4, mime: "video/mp4", kind: .video))
+                        } else {
+                            // Fallback: keep original but mark as video with original mime
+                            tmp.append(MediaItem(data: data, mime: initialMime, kind: .video))
+                        }
+                    } else {
+                        let kind: MediaItem.Kind = isVideo ? .video : .photo
+                        tmp.append(MediaItem(data: data, mime: initialMime, kind: kind))
+                    }
                 }
             }
             let result = tmp
@@ -97,8 +109,45 @@ final class CreatePostViewModel: ObservableObject {
     }
 
     private func fileExtension(for mime: String) -> String {
-        if mime.hasPrefix("image/") { return "jpg" }
-        if mime.hasPrefix("video/") { return "mp4" }
-        return "bin"
+        // Map common MIME types to appropriate extensions
+        switch mime.lowercased() {
+        case "image/jpeg", "image/jpg": return "jpg"
+        case "image/png": return "png"
+        case "image/heic": return "heic"
+        case "video/mp4", "video/h264": return "mp4"
+        case "video/quicktime": return "mov"
+        case "video/hevc": return "mov" // HEVC typically in .mov container from Photos
+        default:
+            if mime.hasPrefix("image/") { return "jpg" }
+            if mime.hasPrefix("video/") { return "mp4" }
+            return "bin"
+        }
+    }
+
+    // MARK: - Local transcoding to MP4 for iOS compatibility
+    private func transcodeToMP4(data: Data, suggestedType: UTType?) async -> Data? {
+        // Write to a temporary file so AVAsset can read it
+        let ext = suggestedType?.preferredFilenameExtension ?? "mov"
+        let inputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("in_\(UUID().uuidString).\(ext)")
+        do { try data.write(to: inputURL, options: .atomic) } catch { return nil }
+        let asset = AVAsset(url: inputURL)
+        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else { return nil }
+        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("out_\(UUID().uuidString).mp4")
+        session.outputURL = outputURL
+        session.outputFileType = .mp4
+        session.shouldOptimizeForNetworkUse = true
+        return await withUnsafeContinuation { cont in
+            session.exportAsynchronously { [inputURL, outputURL] in
+                defer {
+                    try? FileManager.default.removeItem(at: inputURL)
+                    try? FileManager.default.removeItem(at: outputURL)
+                }
+                if session.status == .completed, let outData = try? Data(contentsOf: outputURL) {
+                    cont.resume(returning: outData)
+                } else {
+                    cont.resume(returning: nil)
+                }
+            }
+        }
     }
 }
