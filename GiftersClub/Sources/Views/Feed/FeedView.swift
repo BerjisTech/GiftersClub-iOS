@@ -858,8 +858,7 @@ private struct VideoBackgroundView: View {
                     }
                     // Also hide when item becomes ready (even if not playing)
                     if let item = p.currentItem {
-                        statusObserver = item.observe(\.
-                            status, options: [.new]) { it, _ in
+                        statusObserver = item.observe(\.status, options: [.new]) { it, _ in
                             if it.status == .readyToPlay { showLoadingBar = false }
                         }
                     }

@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct ChatDetailView: View {
     let partner: ConversationItem.Partner
@@ -12,6 +13,8 @@ struct ChatDetailView: View {
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var selectedData: Data? = nil
     @State private var selectedMime: String? = nil
+    @State private var selectedDocURL: URL? = nil
+    @State private var showDocImporter: Bool = false
     @State private var isSending: Bool = false
 
     @State private var showDeleteConversationConfirm = false
@@ -77,28 +80,42 @@ struct ChatDetailView: View {
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06)))
                 }
                 HStack(spacing: 8) {
-                PhotosPicker(selection: $selectedItem, matching: .any(of: [.images, .videos])) {
-                    Image(systemName: selectedData == nil ? "paperclip" : "checkmark.circle.fill")
+                Menu {
+                    PhotosPicker(selection: $selectedItem, matching: .any(of: [.images, .videos])) {
+                        Label("Photo or Video", systemImage: "photo.on.rectangle")
+                    }
+                    Button {
+                        showDocImporter = true
+                    } label: {
+                        Label("Document", systemImage: "doc")
+                    }
+                } label: {
+                    Image(systemName: (selectedData != nil || selectedDocURL != nil || selectedItem != nil) ? "checkmark.circle.fill" : "paperclip")
                         .font(.title3)
                 }
                 .onChange(of: selectedItem, perform: { item in
                     guard let item else { return }
-                    Task {
-                        // Try images first
-                        if let data = try? await item.loadTransferable(type: Data.self) {
-                            await MainActor.run { selectedData = data; selectedMime = item.supportedContentTypes.first?.preferredMIMEType ?? "application/octet-stream" }
-                        } else {
-                            selectedData = nil; selectedMime = nil
-                        }
-                    }
+                    // Do not eagerly load large files; just record that a selection exists and enable Send
+                    selectedData = nil
+                    selectedMime = item.supportedContentTypes.first?.preferredMIMEType ?? nil
                 })
+                .fileImporter(isPresented: $showDocImporter, allowedContentTypes: [UTType.data], allowsMultipleSelection: false) { res in
+                    switch res {
+                    case .success(let urls):
+                        selectedDocURL = urls.first
+                        selectedData = nil
+                        selectedMime = nil
+                    case .failure:
+                        selectedDocURL = nil
+                    }
+                }
                 TextField("Message", text: $input)
                     .textFieldStyle(.roundedBorder)
                 Button { Task { await send() } } label: {
                     Image(systemName: "paperplane.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isSending || (input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedData == nil))
+                .disabled(isSending || (input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedData == nil && selectedDocURL == nil && selectedItem == nil))
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 8)
@@ -237,10 +254,30 @@ struct ChatDetailView: View {
 
     private func send() async {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.isEmpty && selectedData == nil { return }
+        if text.isEmpty && selectedData == nil && selectedDocURL == nil && selectedItem == nil { return }
         input = ""; isSending = true
         do {
             var attachments: [SupabaseManager.MessageAttachment] = []
+            // If a document was picked, upload it as a file type
+            if let doc = selectedDocURL {
+                let data = try Data(contentsOf: doc)
+                let mime = mimeType(for: doc) ?? "application/octet-stream"
+                let ext = doc.pathExtension.isEmpty ? (mime.split(separator: "/").last.map(String.init) ?? "bin") : doc.pathExtension
+                let name = "chat-\(Int(Date().timeIntervalSince1970)).\(ext)"
+                // Shimmer placeholder for attachment
+                let phId = "local-\(name)"
+                let ph = ChatAttachment(url: nil, type: "file")
+                messages.append(MessageItem(id: phId, fromMe: true, text: "", time: "now", attachments: [ph]))
+                selectedDocURL = nil
+                let publicUrl = try await supabase.uploadMedia(bytes: data, fileName: name, mimeType: mime, bucket: "post")
+                attachments.append(.init(url: publicUrl, type: "file"))
+            } else if let item = selectedItem, selectedData == nil {
+                // Lazy-load selected photo/video data now
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    let mime = item.supportedContentTypes.first?.preferredMIMEType ?? "application/octet-stream"
+                    await MainActor.run { selectedData = data; selectedMime = mime }
+                }
+            }
             if let data = selectedData, let mime = selectedMime {
                 let ext = mime.split(separator: "/").last.map(String.init) ?? "bin"
                 let name = "chat-\(Int(Date().timeIntervalSince1970)).\(ext)"
@@ -267,6 +304,15 @@ struct ChatDetailView: View {
             banners.show(Banner(title: "Failed to send attachment", style: .error))
             input = text; isSending = false
         }
+    }
+
+    private func mimeType(for url: URL) -> String? {
+        if #available(iOS 14.0, *) {
+            if let type = UTType(filenameExtension: url.pathExtension) {
+                return type.preferredMIMEType
+            }
+        }
+        return nil
     }
 
     private static func relativeTime(_ iso: String) -> String {

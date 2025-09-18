@@ -82,3 +82,13 @@ Acceptance checklist before marking “Yes” in App Store Connect:
   - do better caching
   -------------------------------------------------------------------------------------
   - delete message options. whole conversation and spercific messages in conversation
+
+  - a user noticerd that the send button only becomes blue when there's text in chat input so they have no way of posting media without text. Allow users to send photo or video or document as they choose without the need to write text
+  - selecting media when creating post takes time for practically all users on iphones especially older ones like 11 to 13. When they select from device and click add or done, it takes a while before they're sent to the edit section
+  - add option to delete edits like when a caption is added or a meme or a sticker.
+  - users especially on smaller devices are saying the items on screen in edit section are squeezed, you can make them scroll and use the whole screen top to bottom side to side
+
+  - some users report reset button for filter in post creation doesn't reset the filters.
+  - users are requesting option to set duration that a sticker/meme/sticker stays when the media being edited is video
+  - Some users are requesting autocaptions
+  - Users are also requesting hashtag suggestion, ie in the details section when they type #followed by something a typeahead and a scrollable list of hashtags options based on what they've alread typed including number of times the hastag has beed used is displayed and they can tap on an option and it can be used in the description. For hashtag details check the angular project for interface.ts/interfaces.ts and migration files to see how hashtags were set up on the app

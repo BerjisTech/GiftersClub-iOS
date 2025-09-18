@@ -406,6 +406,9 @@ struct CreatePostCameraView: View {
                             Image(systemName: "photo.on.rectangle").font(.title3).foregroundStyle(.white)
                         }
                         .onChange(of: pickerItems, perform: { newItems in
+                            // Navigate to editor immediately for responsiveness; load in background
+                            vm.isLoadingMedia = true
+                            activeSheet = .details
                             Task {
                                 var loaded: [CreatePostViewModel.MediaItem] = []
                                 for item in newItems {
@@ -415,7 +418,7 @@ struct CreatePostCameraView: View {
                                         loaded.append(.init(data: data, mime: mime, kind: kind))
                                     }
                                 }
-                                await MainActor.run { vm.media = loaded; activeSheet = .details }
+                                await MainActor.run { vm.media = loaded; vm.isLoadingMedia = false }
                             }
                         })
                     }

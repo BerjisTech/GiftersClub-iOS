@@ -30,6 +30,7 @@ final class CreatePostViewModel: ObservableObject {
     @Published var priceText: String = ""
     @Published var selectedPickerItems: [PhotosPickerItem] = []
     @Published var media: [MediaItem] = []
+    @Published var isLoadingMedia: Bool = false
     @Published var isPosting: Bool = false
     @Published var errorMessage: String? = nil
     // Subscription plan scope for subscription-only posts
@@ -46,6 +47,7 @@ final class CreatePostViewModel: ObservableObject {
 
     func loadPickerItems() {
         Task {
+            await MainActor.run { self.isLoadingMedia = true }
             var tmp: [MediaItem] = []
             for item in selectedPickerItems {
                 if let data = try? await item.loadTransferable(type: Data.self) {
@@ -56,7 +58,10 @@ final class CreatePostViewModel: ObservableObject {
                 }
             }
             let result = tmp
-            await MainActor.run { self.media = result }
+            await MainActor.run {
+                self.media = result
+                self.isLoadingMedia = false
+            }
         }
     }
 

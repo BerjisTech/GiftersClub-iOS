@@ -112,6 +112,10 @@ struct CreatePostSheet: View {
                 if step == .details && !vm.media.isEmpty { step = .edit }
             }
         }
+        .onChange(of: vm.isLoadingMedia) { loading in
+            // If we were launched in .details but media is loading, show the editor with loader immediately
+            if loading && step == .details { step = .edit }
+        }
     }
     
     @ViewBuilder
@@ -173,7 +177,13 @@ struct CreatePostSheet: View {
                     .padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06)))
                 }
-                .onChange(of: vm.selectedPickerItems, perform: { _ in vm.loadPickerItems() })
+                .onChange(of: vm.selectedPickerItems, perform: { _ in
+                    // Jump to edit immediately and load in the background for better responsiveness
+                    if !vm.selectedPickerItems.isEmpty {
+                        if step == .pick { step = .edit }
+                        vm.loadPickerItems()
+                    }
+                })
             }
             .frame(maxWidth: .infinity)
             
@@ -231,7 +241,21 @@ struct CreatePostSheet: View {
         }
 
         private func EditStep() -> some View {
-            FullscreenMediaEditor(vm: vm, onBack: { step = .pick }, onDone: { step = .details })
+            Group {
+                if vm.media.isEmpty {
+                    ZStack {
+                        Color.black.ignoresSafeArea()
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .tint(.white)
+                            Text(vm.isLoadingMedia ? "Loading media…" : "No media selected")
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                    }
+                } else {
+                    FullscreenMediaEditor(vm: vm, onBack: { step = .pick }, onDone: { step = .details })
+                }
+            }
         }
         
         private func DetailsStep() -> some View {
@@ -682,7 +706,15 @@ struct CreatePostSheet: View {
                 Spacer()
                 Text("Edit").font(.headline)
                 Spacer()
-                Button(action: { Task { await bakeAllEdits(); applyAndNext() } }) { Text("Next").font(.headline) }
+                // Actions: Clear overlays, Next
+                HStack(spacing: 16) {
+                    Button(role: .destructive) {
+                        clearOverlaysForCurrent()
+                    } label: {
+                        Image(systemName: "trash").font(.headline)
+                    }
+                    Button(action: { Task { await bakeAllEdits(); applyAndNext() } }) { Text("Next").font(.headline) }
+                }
             }
             .foregroundStyle(.white)
             .padding(.horizontal)
@@ -1161,6 +1193,14 @@ struct CreatePostSheet: View {
                 updatePreview()
             }
             func applyAndNext() { onDone() }
+
+            func clearOverlaysForCurrent() {
+                guard let mid = currentMediaId() else { return }
+                captions[mid] = []
+                stickers[mid] = []
+                selectedCaptionId = nil
+                selectedStickerId = nil
+            }
             
             func applyCrop() {
                 guard vm.media.indices.contains(current) else { return }
@@ -1341,6 +1381,12 @@ struct CreatePostSheet: View {
                                 viewSize: geo.size,
                                 isSelected: s.id == selectedId,
                                 onSelect: { selectedId = s.id },
+                                onDelete: { id in
+                                    var arr = items
+                                    arr.removeAll { $0.id == id }
+                                    onChange(arr)
+                                    if selectedId == id { selectedId = nil }
+                                },
                                 onUpdate: { updated in
                                     var arr = items
                                     if let idx = arr.firstIndex(where: { $0.id == updated.id }) { arr[idx] = updated }
@@ -1359,6 +1405,7 @@ struct CreatePostSheet: View {
             var viewSize: CGSize
             var isSelected: Bool
             var onSelect: () -> Void
+            var onDelete: (UUID) -> Void
             var onUpdate: (FullscreenMediaEditor.Sticker) -> Void
             @State private var localScale: CGFloat = 1.0
             @State private var localRotation: Angle = .degrees(0)
@@ -1384,6 +1431,13 @@ struct CreatePostSheet: View {
                     )
                     .position(x: mapped.x + localOffset.width, y: mapped.y + localOffset.height)
                     .onTapGesture { onSelect() }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            onDelete(sticker.id)
+                        } label: {
+                            Label("Delete Sticker", systemImage: "trash")
+                        }
+                    }
                     .gesture(
                         SimultaneousGesture(
                             DragGesture().onChanged { v in localOffset = v.translation }.onEnded { _ in
