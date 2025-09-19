@@ -479,6 +479,7 @@ final class SupabaseManager: ObservableObject {
         let is_explicit: Bool?
         let media: [FeedRPCMedia]?
         let profile: FeedRPCProfile?
+        let view_count: Int?
         static func == (lhs: ExplorePost, rhs: ExplorePost) -> Bool { lhs.id == rhs.id }
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
@@ -582,12 +583,13 @@ final class SupabaseManager: ObservableObject {
         let access_type: String?
         let price: Int?
         let media: [FeedRPCMedia]?
+        let view_count: Int?
     }
 
     func fetchUserPostsMinimal(userId: String, limit: Int = 20) async throws -> [UserPostMinimal] {
         let res: PostgrestResponse<[UserPostMinimal]> = try await client
             .from("posts")
-            .select("id,user_id,access_type,price, media:post_media(url,media_type,order)")
+            .select("id,user_id,access_type,price,view_count, media:post_media(url,media_type,order)")
             .eq("user_id", value: userId)
             .order("created_at", ascending: false)
             .limit(limit)
