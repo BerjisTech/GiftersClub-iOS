@@ -7,8 +7,8 @@ struct ProfileModel: Identifiable, Hashable {
     let name: String
     let bio: String
     let imageURL: URL?
-    let followers: Int
-    let following: Int
+    var followers: Int
+    var following: Int
     let isCurrentUser: Bool
     var isFollowing: Bool
     var isFollowedBy: Bool
@@ -294,15 +294,33 @@ struct ProfileDetailView: View {
     private func toggleFollow() async {
         guard var p = profile, let me = supabase.user?.id.uuidString else { return }
         let newFollow = !p.isFollowing
-        // optimistic
+        // Optimistic UI update
         p.isFollowing = newFollow
+        if !p.isCurrentUser {
+            if newFollow { p.followers = max(0, p.followers + 1) }
+            else { p.followers = max(0, p.followers - 1) }
+        }
         profile = p
         do {
             try await supabase.setFollow(currentUserId: me, targetUserId: p.userId, follow: newFollow)
-            // optionally refresh follow-back status
+            // Refresh counts from backend for accuracy
+            if let fresh = try? await supabase.fetchProfile(username: p.username, userId: p.userId) {
+                await MainActor.run {
+                    if var cur = profile {
+                        cur.followers = fresh.followers_count ?? cur.followers
+                        cur.following = fresh.following_count ?? cur.following
+                        profile = cur
+                    }
+                }
+            }
         } catch {
             // revert on error
             p.isFollowing.toggle()
+            // Revert optimistic followers delta
+            if !p.isCurrentUser {
+                if newFollow { p.followers = max(0, p.followers - 1) }
+                else { p.followers = max(0, p.followers + 1) }
+            }
             profile = p
             banners.show(Banner(title: "Failed to update follow", style: .error))
         }

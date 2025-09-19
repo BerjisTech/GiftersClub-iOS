@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 import AVFoundation
 import AVKit
 
@@ -88,6 +89,7 @@ struct CreatePostSheet: View {
     @State private var showSettings = false
     @State private var showPreview = false
     @State private var previewModel: PostViewerModel? = nil
+    @State private var showFileImporter = false
     
     init(vm: CreatePostViewModel? = nil, initial: CreatePostStep = .pick) {
         _vm = StateObject(wrappedValue: vm ?? CreatePostViewModel())
@@ -198,6 +200,19 @@ struct CreatePostSheet: View {
                         vm.loadPickerItems()
                     }
                 })
+
+                // Files (macOS / iOS) – allows importing from device storage
+                Button {
+                    showFileImporter = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder")
+                        Text("Files")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06)))
+                }
             }
             .frame(maxWidth: .infinity)
             
@@ -252,8 +267,32 @@ struct CreatePostSheet: View {
                 }
             }
                 .padding()
+                .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [UTType.image, UTType.movie], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                Task {
+                    var items: [CreatePostViewModel.MediaItem] = []
+                    for url in urls {
+                        #if targetEnvironment(macCatalyst)
+                        _ = url.startAccessingSecurityScopedResource()
+                        defer { url.stopAccessingSecurityScopedResource() }
+                        #endif
+                        if let data = try? Data(contentsOf: url) {
+                            let mime = inferredMime(for: url) ?? "application/octet-stream"
+                            let kind: CreatePostViewModel.MediaItem.Kind = (mime.hasPrefix("video/")) ? .video : .photo
+                            items.append(.init(data: data, mime: mime, kind: kind))
+                        }
+                    }
+                    await MainActor.run {
+                        vm.media.append(contentsOf: items)
+                        if !items.isEmpty { step = .edit }
+                    }
+                }
+            case .failure:
+                break
+            }
         }
-
+        }
         private func presentPreview() {
             guard !vm.media.isEmpty else { return }
             // Write temporary URLs for current media
@@ -518,6 +557,27 @@ struct CreatePostSheet: View {
                 let sorted = plans.sorted { $0.tokens < $1.tokens }
                 await MainActor.run { vm.availablePlans = sorted; vm.selectedPlanId = nil }
             }
+        }
+    }
+
+    // Infer MIME from URL using UTType or extension
+    private func inferredMime(for url: URL) -> String? {
+        if #available(iOS 14.0, *) {
+            if let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType {
+                return type.preferredMIMEType
+            }
+        }
+        let ext = url.pathExtension.lowercased()
+        switch ext {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "heic": return "image/heic"
+        case "mp4", "m4v": return "video/mp4"
+        case "mov": return "video/quicktime"
+        case "webm": return "video/webm"
+        default: return nil
         }
     }
     
