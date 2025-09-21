@@ -970,12 +970,12 @@ struct CreatePostSheet: View {
             .overlay(alignment: .trailing) {
                 SideRail(
                     active: activeTool,
-                    onCrop: { cropMode = true; activeTool = .crop },
-                    onCaption: { addCaption(); activeTool = .caption },
-                    onStickers: { showStickerPicker = true; activeTool = .stickers },
-                    onEffects: { cropMode = false; activeTool = .effects },
-                    onMeme: { generateAIMeme(); activeTool = .meme },
-                    onCaptions: { autoGenerateCaptions(); activeTool = .autocaptions }
+                    onCrop: { selectTool(.crop) },
+                    onCaption: { selectCaptionTool() },
+                    onStickers: { selectTool(.stickers) },
+                    onEffects: { selectTool(.effects) },
+                    onMeme: { selectTool(.meme); generateAIMeme() },
+                    onCaptions: { selectTool(.autocaptions); autoGenerateCaptions() }
                 )
                 .padding(.trailing, 8)
                 .padding(.top, 40)
@@ -1613,6 +1613,45 @@ struct CreatePostSheet: View {
                         vm.media[current] = .init(data: data, mime: "image/jpeg", kind: .photo)
                     }
                     updatePreview()
+                }
+            }
+
+            // Ensure only one pane is visible; close others and set state for selected tool.
+            func selectTool(_ t: Tool) {
+                activeTool = t
+                // Close other panes
+                selectedCaptionId = nil
+                selectedStickerId = nil
+                switch t {
+                case .crop:
+                    cropMode = true
+                    controlsExpanded = true
+                case .effects:
+                    cropMode = false
+                    controlsExpanded = true
+                case .stickers:
+                    cropMode = false
+                    controlsExpanded = false
+                    showStickerPicker = true
+                case .meme, .autocaptions:
+                    cropMode = false
+                    controlsExpanded = false
+                case .caption:
+                    // handled by selectCaptionTool()
+                    break
+                }
+            }
+            func selectCaptionTool() {
+                activeTool = .caption
+                cropMode = false
+                controlsExpanded = false
+                selectedStickerId = nil
+                if selectedCaptionId == nil {
+                    if let mid = currentMediaId(), let existing = captions[mid], !existing.isEmpty {
+                        selectedCaptionId = existing.last?.id
+                    } else {
+                        addCaption()
+                    }
                 }
             }
             
