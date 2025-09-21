@@ -119,13 +119,14 @@ struct CreatePostSheet: View {
         }
         // If user picked media from the library, auto-advance to Edit step when media becomes available
         .onChange(of: vm.media) { newVal in
-            if !newVal.isEmpty && step == .pick { step = .edit }
+            // Move into editor whenever media becomes available
+            if !newVal.isEmpty && step != .edit { step = .edit }
         }
         .onAppear {
             // If invoked directly with .details from camera/library, insert the edit step first
             if !firstAppearHandled {
                 firstAppearHandled = true
-                if step == .details && !vm.media.isEmpty { step = .edit }
+                if step == .details && (vm.isLoadingMedia || !vm.media.isEmpty) { step = .edit }
             }
         }
         .onChange(of: vm.isLoadingMedia) { loading in
@@ -821,6 +822,9 @@ struct CreatePostSheet: View {
         @State private var cropOffset: CGSize = .zero
         @State private var cropAspect: CropAspect = .square
         @State private var controlsExpanded: Bool = false
+        // Active tool indicator for side rail highlight
+        enum Tool { case crop, caption, stickers, effects, meme, autocaptions }
+        @State private var activeTool: Tool? = nil
         // For videos, keep track of duration to support timed overlays
         @State private var videoDuration: [UUID: Double] = [:]
         // Captions per media id
@@ -937,6 +941,18 @@ struct CreatePostSheet: View {
             .padding(.vertical, 8)
         }
 
+        private var currentToolLabel: String? {
+            switch activeTool {
+            case .none: return nil
+            case .some(.crop): return "Crop"
+            case .some(.caption): return "Caption"
+            case .some(.stickers): return "Stickers"
+            case .some(.effects): return "Effects"
+            case .some(.meme): return "AI Meme"
+            case .some(.autocaptions): return "Auto CC"
+            }
+        }
+
         @ViewBuilder private var mediaPagerView: some View {
             TabView(selection: $current) {
                 ForEach(Array(vm.media.enumerated()), id: \.1.id) { idx, item in
@@ -953,15 +969,28 @@ struct CreatePostSheet: View {
             .onAppear { updatePreview() }
             .overlay(alignment: .trailing) {
                 SideRail(
-                    onCrop: { cropMode = true },
-                    onCaption: { addCaption() },
-                    onStickers: { showStickerPicker = true },
-                    onEffects: { cropMode = false },
-                    onMeme: { generateAIMeme() },
-                    onCaptions: { autoGenerateCaptions() }
+                    active: activeTool,
+                    onCrop: { cropMode = true; activeTool = .crop },
+                    onCaption: { addCaption(); activeTool = .caption },
+                    onStickers: { showStickerPicker = true; activeTool = .stickers },
+                    onEffects: { cropMode = false; activeTool = .effects },
+                    onMeme: { generateAIMeme(); activeTool = .meme },
+                    onCaptions: { autoGenerateCaptions(); activeTool = .autocaptions }
                 )
                 .padding(.trailing, 8)
                 .padding(.top, 40)
+            }
+            .overlay(alignment: .top) {
+                // Context title: "Edit — <Tool>" for extra clarity
+                if let label = currentToolLabel {
+                    Text("Edit — \(label)")
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .padding(.top, 8)
+                }
             }
         }
 
@@ -978,6 +1007,9 @@ struct CreatePostSheet: View {
                                         .padding(.vertical, 6)
                                         .background(cropAspect == a ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
                                         .clipShape(Capsule())
+                                        .overlay(
+                                            Capsule().stroke(Color.white.opacity(cropAspect == a ? 0.9 : 0), lineWidth: 1)
+                                        )
                                         .onTapGesture { cropAspect = a }
                                 }
                             }
@@ -1002,6 +1034,9 @@ struct CreatePostSheet: View {
                                         .padding(.vertical, 6)
                                         .background(activeControl == c ? Color.white.opacity(0.35) : Color.white.opacity(0.15))
                                         .clipShape(Capsule())
+                                        .overlay(
+                                            Capsule().stroke(Color.white.opacity(activeControl == c ? 0.9 : 0), lineWidth: 1)
+                                        )
                                         .onTapGesture { activeControl = c }
                                 }
                             }
@@ -1436,7 +1471,10 @@ struct CreatePostSheet: View {
                     layer.contentsScale = UIScreen.main.scale
                     layer.frame = CGRect(x: center.x - size.width/2, y: center.y - size.height/2, width: size.width, height: size.height)
                     layer.setAffineTransform(CGAffineTransform(rotationAngle: CGFloat(cap.rotation.radians)))
-                    if let s = cap.start, let e = cap.end, e > s {
+                    // Treat missing start/end as 0/duration so one-sided timing works
+                    let s = cap.start ?? 0
+                    let e = cap.end ?? totalSeconds
+                    if e > s {
                         layer.opacity = 0
                         let anim = CAKeyframeAnimation(keyPath: "opacity")
                         anim.values = [0, 1, 1, 0]
@@ -1462,7 +1500,10 @@ struct CreatePostSheet: View {
                         layer.contents = ui
                         layer.frame = CGRect(x: center.x - w/2, y: center.y - h/2, width: w, height: h)
                         layer.setAffineTransform(CGAffineTransform(rotationAngle: CGFloat(s.rotation.radians)))
-                        if let st = s.start, let en = s.end, en > st {
+                        // Treat missing start/end as 0/duration so one-sided timing works
+                        let st = s.start ?? 0
+                        let en = s.end ?? totalSeconds
+                        if en > st {
                             layer.opacity = 0
                             let anim = CAKeyframeAnimation(keyPath: "opacity")
                             anim.values = [0, 1, 1, 0]
@@ -1648,6 +1689,7 @@ struct CreatePostSheet: View {
 
         // MARK: - Android-style side rail
         private struct SideRail: View {
+            var active: FullscreenMediaEditor.Tool?
             var onCrop: () -> Void
             var onCaption: () -> Void
             var onStickers: () -> Void
@@ -1665,25 +1707,38 @@ struct CreatePostSheet: View {
                     .buttonStyle(.bordered)
                     .tint(.white.opacity(0.15))
                     .foregroundStyle(.white)
-                    railButton(icon: "crop", label: "Crop", action: onCrop, expanded: expanded)
-                    railButton(icon: "textformat", label: "Caption", action: onCaption, expanded: expanded)
-                    railButton(icon: "face.smiling", label: "Stickers", action: onStickers, expanded: expanded)
-                    railButton(icon: "wand.and.stars", label: "Effects", action: onEffects, expanded: expanded)
-                    railButton(icon: "text.bubble", label: "AI Meme", action: onMeme, expanded: expanded)
-                    railButton(icon: "captions.bubble.fill", label: "Auto CC", action: onCaptions, expanded: expanded)
+                    railButton(icon: "crop", label: "Crop", isActive: active == .crop, action: onCrop, expanded: expanded)
+                    railButton(icon: "textformat", label: "Caption", isActive: active == .caption, action: onCaption, expanded: expanded)
+                    railButton(icon: "face.smiling", label: "Stickers", isActive: active == .stickers, action: onStickers, expanded: expanded)
+                    railButton(icon: "wand.and.stars", label: "Effects", isActive: active == .effects, action: onEffects, expanded: expanded)
+                    railButton(icon: "text.bubble", label: "AI Meme", isActive: active == .meme, action: onMeme, expanded: expanded)
+                    railButton(icon: "captions.bubble.fill", label: "Auto CC", isActive: active == .autocaptions, action: onCaptions, expanded: expanded)
                 }
             }
             @ViewBuilder
-            private func railButton(icon: String, label: String, action: @escaping () -> Void, expanded: Bool) -> some View {
+            private func railButton(icon: String, label: String, isActive: Bool, action: @escaping () -> Void, expanded: Bool) -> some View {
                 HStack(spacing: 8) {
                     Button(action: action) {
                         Image(systemName: icon)
                             .padding(8)
                     }
                     .buttonStyle(.bordered)
-                    .tint(.white.opacity(0.15))
+                    .tint(isActive ? .white.opacity(0.35) : .white.opacity(0.15))
                     .foregroundStyle(.white)
-                    if expanded { Text(label).font(.caption).foregroundStyle(.white).transition(.opacity) }
+                    if expanded {
+                        Text(label)
+                            .font(.caption.weight(isActive ? .bold : .regular))
+                            .foregroundStyle(isActive ? .white : .white.opacity(0.85))
+                            .transition(.opacity)
+                    }
+                }
+                .padding(.leading, 4)
+                .overlay(alignment: .leading) {
+                    if isActive {
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.white.opacity(0.9))
+                            .frame(width: 2)
+                    }
                 }
             }
         }
@@ -1786,6 +1841,7 @@ struct CreatePostSheet: View {
                         RoundedRectangle(cornerRadius: 6)
                             .stroke(Color.white.opacity(isSelected ? 0.8 : 0), lineWidth: 2)
                     )
+                    .shadow(color: Color.white.opacity(isSelected ? 0.25 : 0), radius: 6)
                     .position(x: mapped.x + localOffset.width, y: mapped.y + localOffset.height)
                     .onTapGesture { onSelect() }
                     .contextMenu {
@@ -1939,6 +1995,7 @@ struct CreatePostSheet: View {
                                 .offset(x: 12, y: -12)
                         }
                     }
+                    .shadow(color: Color.white.opacity(isSelected ? 0.25 : 0), radius: 6)
                     .gesture(DragGesture().onChanged { v in
                         localCenter = v.location
                     }.onEnded { _ in
