@@ -2239,8 +2239,11 @@ final class SupabaseManager: ObservableObject {
         do {
             let _ = try await BackgroundUploadManager.shared.upload(request: put, data: bytes)
         } catch {
-            // Fallback: foreground upload
-            let _ = try await URLSession.shared.upload(for: put, from: bytes)
+            // Fallback: foreground upload with explicit status check
+            let (_, resp) = try await URLSession.shared.upload(for: put, from: bytes)
+            if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                throw URLError(.badServerResponse)
+            }
         }
         return presign.publicUrl
     }

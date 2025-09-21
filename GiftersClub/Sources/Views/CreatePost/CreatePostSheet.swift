@@ -278,10 +278,25 @@ struct CreatePostSheet: View {
                         _ = url.startAccessingSecurityScopedResource()
                         defer { url.stopAccessingSecurityScopedResource() }
                         #endif
-                        if let data = try? Data(contentsOf: url) {
-                            let mime = inferredMime(for: url) ?? "application/octet-stream"
-                            let kind: CreatePostViewModel.MediaItem.Kind = (mime.hasPrefix("video/")) ? .video : .photo
-                            items.append(.init(data: data, mime: mime, kind: kind))
+                        if let data0 = try? Data(contentsOf: url) {
+                            let mime0 = inferredMime(for: url) ?? "application/octet-stream"
+                            if mime0 == "image/heic" || mime0 == "image/heif" || mime0 == "image/heif-sequence" {
+                                if let img = UIImage(data: data0), let jpeg = img.jpegData(compressionQuality: 0.9) {
+                                    items.append(.init(data: jpeg, mime: "image/jpeg", kind: .photo))
+                                } else {
+                                    items.append(.init(data: data0, mime: mime0, kind: .photo))
+                                }
+                            } else if mime0.hasPrefix("video/") && mime0 != "video/mp4" {
+                                // For safety, try to transcode non-MP4 videos to MP4 using AVAssetExportSession
+                                if let mp4 = await transcodeFileURLToMP4(inputURL: url) {
+                                    items.append(.init(data: mp4, mime: "video/mp4", kind: .video))
+                                } else {
+                                    items.append(.init(data: data0, mime: mime0, kind: .video))
+                                }
+                            } else {
+                                let kind: CreatePostViewModel.MediaItem.Kind = (mime0.hasPrefix("video/")) ? .video : .photo
+                                items.append(.init(data: data0, mime: mime0, kind: kind))
+                            }
                         }
                     }
                     await MainActor.run {
@@ -293,6 +308,22 @@ struct CreatePostSheet: View {
                 break
             }
         }
+        }
+        // Transcode a file URL video to MP4 Data (best-effort)
+        private func transcodeFileURLToMP4(inputURL: URL) async -> Data? {
+            let asset = AVAsset(url: inputURL)
+            guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else { return nil }
+            let outURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("imp_\(UUID().uuidString).mp4")
+            session.outputURL = outURL
+            session.outputFileType = .mp4
+            session.shouldOptimizeForNetworkUse = true
+            return await withUnsafeContinuation { cont in
+                session.exportAsynchronously {
+                    defer { try? FileManager.default.removeItem(at: outURL) }
+                    let data = try? Data(contentsOf: outURL)
+                    cont.resume(returning: data)
+                }
+            }
         }
         private func presentPreview() {
             guard !vm.media.isEmpty else { return }

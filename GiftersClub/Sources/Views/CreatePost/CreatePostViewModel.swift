@@ -60,8 +60,14 @@ final class CreatePostViewModel: ObservableObject {
                         if let mp4 = await transcodeToMP4(data: data, suggestedType: utType) {
                             tmp.append(MediaItem(data: mp4, mime: "video/mp4", kind: .video))
                         } else {
-                            // Fallback: keep original but mark as video with original mime
                             tmp.append(MediaItem(data: data, mime: initialMime, kind: .video))
+                        }
+                    } else if initialMime == "image/heic" || initialMime == "image/heif" || initialMime == "image/heif-sequence" {
+                        // Convert HEIC/HEIF stills to JPEG for compatibility on older devices / services
+                        if let img = UIImage(data: data), let jpeg = img.jpegData(compressionQuality: 0.9) {
+                            tmp.append(MediaItem(data: jpeg, mime: "image/jpeg", kind: .photo))
+                        } else {
+                            tmp.append(MediaItem(data: data, mime: initialMime, kind: .photo))
                         }
                     } else {
                         let kind: MediaItem.Kind = isVideo ? .video : .photo

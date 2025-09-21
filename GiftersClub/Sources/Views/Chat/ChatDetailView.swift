@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 struct ChatDetailView: View {
     let partner: ConversationItem.Partner
@@ -278,7 +279,15 @@ struct ChatDetailView: View {
                     await MainActor.run { selectedData = data; selectedMime = mime }
                 }
             }
-            if let data = selectedData, let mime = selectedMime {
+            if var data = selectedData, var mime = selectedMime {
+                // Transcode for compatibility: HEIC -> JPEG, non-MP4 video -> MP4
+                if mime == "image/heic" || mime == "image/heif" || mime == "image/heif-sequence" {
+                    if let img = UIImage(data: data), let jpeg = img.jpegData(compressionQuality: 0.9) {
+                        data = jpeg; mime = "image/jpeg"
+                    }
+                } else if mime.hasPrefix("video/") && mime != "video/mp4" {
+                    if let mp4 = await transcodeToMP4(data: data) { data = mp4; mime = "video/mp4" }
+                }
                 let ext = mime.split(separator: "/").last.map(String.init) ?? "bin"
                 let name = "chat-\(Int(Date().timeIntervalSince1970)).\(ext)"
                 // Insert shimmer placeholder message on my side while uploading and hide preview immediately
@@ -313,6 +322,25 @@ struct ChatDetailView: View {
             }
         }
         return nil
+    }
+
+    // Minimal local video transcode to MP4 for compatibility across devices/buckets
+    private func transcodeToMP4(data: Data) async -> Data? {
+        let inputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("chat_in_\(UUID().uuidString).mov")
+        do { try data.write(to: inputURL, options: .atomic) } catch { return nil }
+        let asset = AVAsset(url: inputURL)
+        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else { return nil }
+        let outURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("chat_out_\(UUID().uuidString).mp4")
+        session.outputURL = outURL
+        session.outputFileType = .mp4
+        session.shouldOptimizeForNetworkUse = true
+        return await withUnsafeContinuation { cont in
+            session.exportAsynchronously {
+                defer { try? FileManager.default.removeItem(at: inputURL); try? FileManager.default.removeItem(at: outURL) }
+                let data = try? Data(contentsOf: outURL)
+                cont.resume(returning: data)
+            }
+        }
     }
 
     private static func relativeTime(_ iso: String) -> String {

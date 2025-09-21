@@ -36,6 +36,10 @@ final class BackgroundUploadManager: NSObject, URLSessionTaskDelegate, URLSessio
             try? FileManager.default.removeItem(at: url)
         }
         if let error { completion(.failure(error)); return }
+        if let http = task.response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            completion(.failure(URLError(.badServerResponse)))
+            return
+        }
         let resp = task.response ?? URLResponse()
         completion(.success((Data(), resp)))
     }
