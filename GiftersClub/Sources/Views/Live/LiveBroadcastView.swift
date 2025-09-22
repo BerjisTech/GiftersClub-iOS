@@ -238,25 +238,36 @@ struct LiveBroadcastView: View {
     private var topBar: some View {
         HStack(alignment: .top, spacing: 8) {
             // Streamer details box (avatar + username/followers)
-            HStack(spacing: 8) {
-                if let img = hostProfile?.image, let url = URL(string: img) {
-                    AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
-                        .frame(width: 40, height: 40)
-                        .clipShape(Circle())
-                } else { Circle().fill(Color.white.opacity(0.25)).frame(width: 40, height: 40) }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(hostProfile?.username ?? "").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                    if let f = hostProfile?.followers_count { Text("\(f) followers").font(.caption2).foregroundStyle(.white.opacity(0.9)) }
-                    HStack(spacing: 6) {
-                        Image(systemName: "eye.fill").foregroundStyle(.white)
-                        Text("\(viewers)").foregroundStyle(.white).font(.footnote)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    if let img = hostProfile?.image, let url = URL(string: img) {
+                        AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                            .frame(width: 40, height: 40)
+                            .clipShape(Circle())
+                    } else { Circle().fill(Color.white.opacity(0.25)).frame(width: 40, height: 40) }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(hostProfile?.username ?? "").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                        if let f = hostProfile?.followers_count { Text("\(f) followers").font(.caption2).foregroundStyle(.white.opacity(0.9)) }
+                        HStack(spacing: 6) {
+                            Image(systemName: "eye.fill").foregroundStyle(.white)
+                            Text("\(viewers)").foregroundStyle(.white).font(.footnote)
+                        }
                     }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.35))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                // Taps row under details (host sees total taps always)
+                HStack(spacing: 8) {
+                    Image(systemName: "heart.fill").foregroundStyle(.red)
+                    Text(shortCount(totalTaps)).foregroundStyle(.white).font(.footnote)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.35))
+                .clipShape(Capsule())
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(Color.black.opacity(0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             Spacer(minLength: 8)
 
@@ -288,6 +299,12 @@ struct LiveBroadcastView: View {
             .background(Color.black.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
+    }
+
+    private func shortCount(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fm", Double(n)/1_000_000.0) }
+        if n >= 1_000 { return String(format: "%.1fk", Double(n)/1_000.0) }
+        return String(n)
     }
 
     private var bottomBar: some View {
