@@ -352,7 +352,7 @@ struct ChatDetailView: View {
         let inputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("chat_in_\(UUID().uuidString).mov")
         do { try data.write(to: inputURL, options: .atomic) } catch { return nil }
         let asset = AVAsset(url: inputURL)
-        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else { return nil }
+        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1280x720) else { return nil }
         let outURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("chat_out_\(UUID().uuidString).mp4")
         session.outputURL = outURL
         session.outputFileType = .mp4

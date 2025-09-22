@@ -1556,6 +1556,7 @@ struct CreatePostSheet: View {
                     guard let exporter = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHighestQuality) else { cont.resume(returning: nil); return }
                     exporter.outputURL = outURL
                     exporter.outputFileType = .mp4
+                    exporter.shouldOptimizeForNetworkUse = true
                     exporter.videoComposition = videoComp
                     exporter.exportAsynchronously {
                         let exists = FileManager.default.fileExists(atPath: outURL.path)

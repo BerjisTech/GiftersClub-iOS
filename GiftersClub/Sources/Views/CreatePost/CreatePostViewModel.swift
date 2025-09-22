@@ -143,7 +143,27 @@ final class CreatePostViewModel: ObservableObject {
         let inputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("in_\(UUID().uuidString).\(ext)")
         do { try data.write(to: inputURL, options: .atomic) } catch { return nil }
         let asset = AVAsset(url: inputURL)
-        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else { return nil }
+        // Build a composition to normalize orientation and timescale
+        let comp = AVMutableComposition()
+        guard
+            let videoTrack = asset.tracks(withMediaType: .video).first,
+            let compVideo = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+        else {
+            return try? Data(contentsOf: inputURL)
+        }
+        compVideo.preferredTransform = videoTrack.preferredTransform
+        do {
+            try compVideo.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: videoTrack, at: .zero)
+        } catch {
+            return nil
+        }
+        if let audioTrack = asset.tracks(withMediaType: .audio).first,
+           let compAudio = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            _ = try? compAudio.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: audioTrack, at: .zero)
+        }
+        // Export to MP4 (H.264/AAC) using a safe preset
+        let preset = AVAssetExportPreset1280x720
+        guard let session = AVAssetExportSession(asset: comp, presetName: preset) else { return nil }
         let outputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("out_\(UUID().uuidString).mp4")
         session.outputURL = outputURL
         session.outputFileType = .mp4
@@ -154,6 +174,7 @@ final class CreatePostViewModel: ObservableObject {
                     try? FileManager.default.removeItem(at: inputURL)
                     try? FileManager.default.removeItem(at: outputURL)
                 }
+                guard session.status == .completed else { cont.resume(returning: nil); return }
                 let data = try? Data(contentsOf: outputURL)
                 cont.resume(returning: data)
             }
