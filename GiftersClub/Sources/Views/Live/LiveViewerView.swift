@@ -718,6 +718,10 @@ struct LiveViewerView: View {
                     .eq("follower_id", value: me)
                     .execute()
                 await MainActor.run { isFollowing = false }
+                // Refresh host profile to update followers_count
+                if let fresh = try? await supa.fetchProfileByUserId(live.host_id) {
+                    await MainActor.run { hostProfile = fresh }
+                }
             } else {
                 struct F: Encodable { let followed_id: String; let follower_id: String }
                 _ = try await supa.client
@@ -725,6 +729,9 @@ struct LiveViewerView: View {
                     .select("id")
                     .execute()
                 await MainActor.run { isFollowing = true }
+                if let fresh = try? await supa.fetchProfileByUserId(live.host_id) {
+                    await MainActor.run { hostProfile = fresh }
+                }
             }
         } catch { }
     }
