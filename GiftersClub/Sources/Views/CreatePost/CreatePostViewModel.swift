@@ -190,7 +190,7 @@ final class CreatePostViewModel: ObservableObject {
         session.outputURL = outputURL
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
-        return await withCheckedContinuation { cont in
+        return await withUnsafeContinuation { cont in
             session.exportAsynchronously { [inputURL, outputURL] in
                 defer {
                     try? FileManager.default.removeItem(at: inputURL)
