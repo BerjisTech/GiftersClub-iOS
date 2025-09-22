@@ -233,6 +233,7 @@ final class SupabaseManager: ObservableObject {
     }
     struct DBGift: Decodable { let id: String; let name: String?; let tokens: Int?; let image: String? }
     struct DBSticker: Decodable, Identifiable { let id: String; let name: String; let image_url: String; let is_active: Bool?; let sort_index: Int? }
+    struct DBCreatorCreditEnrollment: Decodable, Identifiable { let id: String; let user_id: String; let username: String; let status: String; let reject_reason: String?; let requested_at: String?; let processed_at: String? }
     struct DBTopGifter: Decodable {
         let user_id: String
         let username: String
@@ -508,6 +509,39 @@ final class SupabaseManager: ObservableObject {
         // Filter explicit posts client-side as a safety net
         func filter(_ arr: [ExplorePost]) -> [ExplorePost] { arr.filter { ($0.is_explicit ?? false) == false } }
         return ExploreResult(top: filter(res.value.top), videos: filter(res.value.videos), photos: filter(res.value.photos), users: res.value.users, live: res.value.live)
+    }
+
+    // MARK: - Creator Credit Enrollment
+    /// Fetch current user's creator credit enrollment record, if any
+    func fetchMyCreatorCreditEnrollment() async throws -> DBCreatorCreditEnrollment? {
+        guard let me = user?.id.uuidString else { return nil }
+        let res: PostgrestResponse<[DBCreatorCreditEnrollment]> = try await client
+            .from("creator_credit_enrollments")
+            .select("*")
+            .eq("user_id", value: me)
+            .limit(1)
+            .execute()
+        return res.value.first
+    }
+
+    /// Request creator credit enrollment for the current user. Idempotent via onConflict(user_id).
+    func requestCreatorCreditEnrollment() async throws {
+        guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        // Get username snapshot
+        let prof = try await fetchProfile(username: nil, userId: me)
+        let uname = prof?.username ?? ""
+        struct Payload: Encodable { let user_id: String; let username: String }
+        do {
+            _ = try await client
+                .from("creator_credit_enrollments")
+                .insert([Payload(user_id: me, username: uname)])
+                .execute()
+        } catch {
+            // If unique violation occurs (already requested), ignore
+            #if DEBUG
+            print("requestCreatorCreditEnrollment insert error: \(error)")
+            #endif
+        }
     }
 
     // MARK: - Search Suggestions

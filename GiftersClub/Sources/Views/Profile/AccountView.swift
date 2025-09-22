@@ -10,6 +10,7 @@ struct AccountView: View {
     @State private var fulfilledWishlists = 0
     @State private var showTopUp = false
     @State private var showWithdrawals = false
+    @State private var showCreatorCreditEnroll = false
     @State private var showCreditsInfo = false
     @StateObject private var banners = BannerQueue()
 
@@ -47,7 +48,6 @@ struct AccountView: View {
                         }
                         HStack(spacing: 10) {
                             GradientButton(title: "Buy Tokens") { showTopUp = true }
-                            GradientButton(title: "Creator Credits") { showWithdrawals = true }
                             Button(action: { showCreditsInfo = true }) {
                                 Image(systemName: "questionmark.circle")
                                     .font(.title3)
@@ -60,6 +60,9 @@ struct AccountView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 16).fill(Color.primary.opacity(0.04)))
                 }
+
+                // Full-width Creator Credits button below tokens, above gifts
+                GradientButton(title: "Creator Credits") { showCreatorCreditEnroll = true }
 
                 // Gifts details card
                 VStack(alignment: .leading, spacing: 8) {
@@ -128,6 +131,7 @@ struct AccountView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .navigationDestination(isPresented: $showWithdrawals) { WithdrawalsView() }
+        .navigationDestination(isPresented: $showCreatorCreditEnroll) { CreatorCreditEnrollmentRequestView() }
         .navigationDestination(isPresented: $showCreditsInfo) { CreatorCreditsInfoView() }
         .sheet(isPresented: $showTopUp, onDismiss: { Task { await load() } }) {
             TokenTopUpSheet(onCompleted: { success in
