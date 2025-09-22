@@ -47,13 +47,9 @@ struct AccountView: View {
                             }
                         }
                         HStack(spacing: 10) {
-                            GradientButton(title: "Buy Tokens") { showTopUp = true }
-                            Button(action: { showCreditsInfo = true }) {
-                                Image(systemName: "questionmark.circle")
-                                    .font(.title3)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("What are creator credits?")
+                            // Make Buy Tokens button smaller
+                            GradientButton(title: "Buy Tokens", config: .init(cornerRadius: 10, height: 40, horizontalPadding: 0)) { showTopUp = true }
+                                .frame(width: 140)
                         }
                     }
                     .padding(16)
@@ -61,8 +57,16 @@ struct AccountView: View {
                     .background(RoundedRectangle(cornerRadius: 16).fill(Color.primary.opacity(0.04)))
                 }
 
-                // Full-width Creator Credits button below tokens, above gifts
-                GradientButton(title: "Creator Credits") { showCreatorCreditEnroll = true }
+                // Full-width Creator Credits button with info icon next to it
+                HStack(spacing: 10) {
+                    GradientButton(title: "Creator Credits") { showCreatorCreditEnroll = true }
+                    Button(action: { showCreditsInfo = true }) {
+                        Image(systemName: "questionmark.circle")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("What are creator credits?")
+                }
 
                 // Gifts details card
                 VStack(alignment: .leading, spacing: 8) {
