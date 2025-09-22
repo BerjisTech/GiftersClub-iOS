@@ -52,6 +52,7 @@ final class CreatePostViewModel: ObservableObject {
             var tmp: [MediaItem] = []
             for item in selectedPickerItems {
                 if let data = try? await item.loadTransferable(type: Data.self) {
+                    await Task.yield()
                     let utType = item.supportedContentTypes.first
                     let initialMime = utType?.preferredMIMEType ?? "application/octet-stream"
                     let isVideo = initialMime.hasPrefix("video/")
@@ -64,10 +65,12 @@ final class CreatePostViewModel: ObservableObject {
                         }
                     } else if initialMime == "image/heic" || initialMime == "image/heif" || initialMime == "image/heif-sequence" {
                         // Convert HEIC/HEIF stills to JPEG for compatibility on older devices / services
-                        if let img = UIImage(data: data), let jpeg = img.jpegData(compressionQuality: 0.9) {
-                            tmp.append(MediaItem(data: jpeg, mime: "image/jpeg", kind: .photo))
-                        } else {
-                            tmp.append(MediaItem(data: data, mime: initialMime, kind: .photo))
+                        autoreleasepool {
+                            if let img = UIImage(data: data), let jpeg = img.jpegData(compressionQuality: 0.9) {
+                                tmp.append(MediaItem(data: jpeg, mime: "image/jpeg", kind: .photo))
+                            } else {
+                                tmp.append(MediaItem(data: data, mime: initialMime, kind: .photo))
+                            }
                         }
                     } else {
                         let kind: MediaItem.Kind = isVideo ? .video : .photo

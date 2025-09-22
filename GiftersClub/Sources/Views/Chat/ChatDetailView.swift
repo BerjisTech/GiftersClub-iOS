@@ -280,10 +280,13 @@ struct ChatDetailView: View {
                 }
             }
             if var data = selectedData, var mime = selectedMime {
+                await Task.yield()
                 // Transcode for compatibility: HEIC -> JPEG, non-MP4 video -> MP4
                 if mime == "image/heic" || mime == "image/heif" || mime == "image/heif-sequence" {
-                    if let img = UIImage(data: data), let jpeg = img.jpegData(compressionQuality: 0.9) {
-                        data = jpeg; mime = "image/jpeg"
+                    autoreleasepool {
+                        if let img = UIImage(data: data), let jpeg = img.jpegData(compressionQuality: 0.9) {
+                            data = jpeg; mime = "image/jpeg"
+                        }
                     }
                 } else if mime.hasPrefix("video/") && mime != "video/mp4" {
                     if let mp4 = await transcodeToMP4(data: data) { data = mp4; mime = "video/mp4" }

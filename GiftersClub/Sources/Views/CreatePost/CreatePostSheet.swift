@@ -274,17 +274,20 @@ struct CreatePostSheet: View {
                 Task {
                     var items: [CreatePostViewModel.MediaItem] = []
                     for url in urls {
+                        await Task.yield()
                         #if targetEnvironment(macCatalyst)
                         _ = url.startAccessingSecurityScopedResource()
                         defer { url.stopAccessingSecurityScopedResource() }
                         #endif
-                        if let data0 = try? Data(contentsOf: url) {
+                        if let data0 = try? Data(contentsOf: url, options: [.mappedIfSafe]) {
                             let mime0 = inferredMime(for: url) ?? "application/octet-stream"
                             if mime0 == "image/heic" || mime0 == "image/heif" || mime0 == "image/heif-sequence" {
-                                if let img = UIImage(data: data0), let jpeg = img.jpegData(compressionQuality: 0.9) {
-                                    items.append(.init(data: jpeg, mime: "image/jpeg", kind: .photo))
-                                } else {
-                                    items.append(.init(data: data0, mime: mime0, kind: .photo))
+                                autoreleasepool {
+                                    if let img = UIImage(data: data0), let jpeg = img.jpegData(compressionQuality: 0.9) {
+                                        items.append(.init(data: jpeg, mime: "image/jpeg", kind: .photo))
+                                    } else {
+                                        items.append(.init(data: data0, mime: mime0, kind: .photo))
+                                    }
                                 }
                             } else if mime0.hasPrefix("video/") && mime0 != "video/mp4" {
                                 // For safety, try to transcode non-MP4 videos to MP4 using AVAssetExportSession
