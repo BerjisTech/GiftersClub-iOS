@@ -204,10 +204,16 @@ struct ChatDetailView: View {
         let cached = supabase.cachedMessages(partnerId: partner.userId)
         if !cached.isEmpty {
             messages = cached.map { r in
-                MessageItem(
+                let text: String = {
+                    if let data = r.content.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        if obj["alg"] != nil && obj["ct"] != nil { return "[Encrypted message — restore chat key]" }
+                    }
+                    return r.content
+                }()
+                return MessageItem(
                     id: r.id,
                     fromMe: r.sender_id != partner.userId,
-                    text: r.content,
+                    text: text,
                     time: Self.relativeTime(r.created_at),
                     attachments: r.attachments?.compactMap { a in
                         guard let u = a.url, let url = URL(string: u) else { return nil }
@@ -252,11 +258,17 @@ struct ChatDetailView: View {
     @MainActor private func loadMessages() async {
         let rows = await supabase.syncMessages(partnerId: partner.userId)
         messages = rows.map { r in
+            let text: String = {
+                if let data = r.content.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if obj["alg"] != nil && obj["ct"] != nil { return "[Encrypted message — restore chat key]" }
+                }
+                return r.content
+            }()
             MessageItem(
                 id: r.id,
                 // Determine direction by comparing to partner id to avoid relying on auth state timing
                 fromMe: r.sender_id != partner.userId,
-                text: r.content,
+                text: text,
                 time: Self.relativeTime(r.created_at),
                 attachments: r.attachments?.compactMap { a in
                     guard let u = a.url, let url = URL(string: u) else { return nil }

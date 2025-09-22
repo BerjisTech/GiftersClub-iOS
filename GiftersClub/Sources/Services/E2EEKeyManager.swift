@@ -62,10 +62,11 @@ final class E2EEKeyManager {
 
     // MARK: - Keychain storage (private key only)
     private func loadPrivate() throws -> Curve25519.KeyAgreement.PrivateKey? {
-        let query: [String: Any] = [kSecClass as String: kSecClassKey,
+        var query: [String: Any] = [kSecClass as String: kSecClassKey,
                                     kSecAttrApplicationTag as String: privTag,
                                     kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
                                     kSecReturnData as String: true]
+        query[kSecAttrSynchronizable as String] = kCFBooleanTrue
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecSuccess, let data = item as? Data { return try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) }
@@ -80,11 +81,13 @@ final class E2EEKeyManager {
                                        kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom]
         SecItemDelete(delQuery as CFDictionary)
         // Add
-        let add: [String: Any] = [kSecClass as String: kSecClassKey,
+        var add: [String: Any] = [kSecClass as String: kSecClassKey,
                                   kSecAttrApplicationTag as String: privTag,
                                   kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
                                   kSecValueData as String: data,
                                   kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+        // Opt into iCloud Keychain sync when available so keys survive reinstalls on same Apple ID
+        add[kSecAttrSynchronizable as String] = kCFBooleanTrue
         let status = SecItemAdd(add as CFDictionary, nil)
         if status != errSecSuccess { throw NSError(domain: "E2EE", code: Int(status)) }
     }
