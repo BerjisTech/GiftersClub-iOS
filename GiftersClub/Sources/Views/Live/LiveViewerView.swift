@@ -433,6 +433,8 @@ struct LiveViewerView: View {
             tapHearts.removeAll { $0.id == h.id }
         }
         localTapCount += 1
+        // Optimistic total taps update for immediate feedback
+        totalTaps += 1
         Task { await supa.incrementLiveTaps(streamId: live.id, inc: 1) }
         // Also send a realtime tap signal via LiveKit so cross‑platform hosts see hearts immediately
         viewer.sendTap()
