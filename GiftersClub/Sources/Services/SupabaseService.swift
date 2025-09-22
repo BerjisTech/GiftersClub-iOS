@@ -1669,10 +1669,10 @@ final class SupabaseManager: ObservableObject {
         if follow {
             _ = try await client
                 .from("follows")
-                .insert([[
+                .upsert([[
                     "follower_id": currentUserId,
                     "followed_id": targetUserId
-                ]])
+                ]], onConflict: "followed_id,follower_id")
                 .execute()
         } else {
             _ = try await client

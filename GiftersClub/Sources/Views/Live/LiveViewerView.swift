@@ -21,6 +21,7 @@ struct LiveViewerView: View {
     @State private var viewerCount: Int = 0
     @State private var hostProfile: SupabaseManager.DBProfile? = nil
     @State private var isFollowing: Bool? = nil
+    @State private var hostFollowersOverride: Int? = nil
     @State private var giftsTimer: Timer? = nil
     @State private var lastGiftAt: String? = nil
     @State private var giftCombos: [String: (count: Int, index: Int)] = [:]
@@ -462,7 +463,7 @@ struct LiveViewerView: View {
                     Text(hostProfile?.username ?? "")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                    if let f = hostProfile?.followers_count {
+                    if let f = hostFollowersOverride ?? hostProfile?.followers_count {
                         Text("\(f) followers")
                             .font(.caption2)
                             .foregroundStyle(.white.opacity(0.9))
@@ -717,20 +718,40 @@ struct LiveViewerView: View {
                     .eq("followed_id", value: live.host_id)
                     .eq("follower_id", value: me)
                     .execute()
-                await MainActor.run { isFollowing = false }
-                // Refresh host profile to update followers_count
+                let base = hostFollowersOverride ?? hostProfile?.followers_count ?? 0
+                let optimistic = max(0, base - 1)
+                await MainActor.run {
+                    isFollowing = false
+                    hostFollowersOverride = optimistic
+                }
+                // Refresh with guard
                 if let fresh = try? await supa.fetchProfileByUserId(live.host_id) {
-                    await MainActor.run { hostProfile = fresh }
+                    await MainActor.run {
+                        // Only apply if not regressing beyond optimistic; then clear override
+                        if (fresh.followers_count ?? optimistic) <= optimistic {
+                            hostProfile = fresh
+                            hostFollowersOverride = nil
+                        }
+                    }
                 }
             } else {
-                struct F: Encodable { let followed_id: String; let follower_id: String }
                 _ = try await supa.client
-                    .from("follows").insert(F(followed_id: live.host_id, follower_id: me))
+                    .from("follows").upsert([["followed_id": live.host_id, "follower_id": me]], onConflict: "followed_id,follower_id")
                     .select("id")
                     .execute()
-                await MainActor.run { isFollowing = true }
+                let base = hostFollowersOverride ?? hostProfile?.followers_count ?? 0
+                let optimistic = base + 1
+                await MainActor.run {
+                    isFollowing = true
+                    hostFollowersOverride = optimistic
+                }
                 if let fresh = try? await supa.fetchProfileByUserId(live.host_id) {
-                    await MainActor.run { hostProfile = fresh }
+                    await MainActor.run {
+                        if (fresh.followers_count ?? optimistic) >= optimistic {
+                            hostProfile = fresh
+                            hostFollowersOverride = nil
+                        }
+                    }
                 }
             }
         } catch { }

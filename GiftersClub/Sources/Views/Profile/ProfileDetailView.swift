@@ -300,14 +300,33 @@ struct ProfileDetailView: View {
             if newFollow { p.followers = max(0, p.followers + 1) }
             else { p.followers = max(0, p.followers - 1) }
         }
+        let optimisticFollowers = p.followers
         profile = p
         do {
             try await supabase.setFollow(currentUserId: me, targetUserId: p.userId, follow: newFollow)
-            // Refresh counts from backend for accuracy
-            if let fresh = try? await supabase.fetchProfile(username: p.username, userId: p.userId) {
+            // Background refresh with guard to prevent stale overwrite due to replica lag
+            Task.detached { [weak supabase] in
+                // small delay to allow triggers to commit
+                try? await Task.sleep(nanoseconds: 600_000_000) // 600ms
+                guard let fresh = try? await supabase?.fetchProfile(username: p.username, userId: p.userId) else { return }
                 await MainActor.run {
                     if var cur = profile {
-                        cur.followers = fresh.followers_count ?? cur.followers
+                        let fetchedFollowers = fresh.followers_count ?? cur.followers
+                        // Only apply if it matches or improves our optimistic expectation
+                        if newFollow {
+                            if fetchedFollowers >= optimisticFollowers {
+                                cur.followers = fetchedFollowers
+                            } else {
+                                // keep optimistic to avoid flicker
+                                cur.followers = optimisticFollowers
+                            }
+                        } else {
+                            if fetchedFollowers <= optimisticFollowers {
+                                cur.followers = fetchedFollowers
+                            } else {
+                                cur.followers = optimisticFollowers
+                            }
+                        }
                         cur.following = fresh.following_count ?? cur.following
                         profile = cur
                     }
