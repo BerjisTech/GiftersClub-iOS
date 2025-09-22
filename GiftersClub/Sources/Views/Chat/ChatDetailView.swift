@@ -33,7 +33,7 @@ struct ChatDetailView: View {
                         ForEach(messages) { msg in
                             // Build the full message content stack: bubble, media, time
                             VStack(alignment: .leading, spacing: 6) {
-                                if !msg.text.isEmpty { Bubble(text: msg.text, fromMe: msg.fromMe) }
+                                if !msg.text.isEmpty { Bubble(text: msg.text, fromMe: msg.fromMe, italic: msg.isPlaceholder) }
                                 if let atts = msg.attachments, !atts.isEmpty { AttachmentsGrid(attachments: atts) }
                                 HStack {
                                     if msg.fromMe { Spacer(minLength: 0) }
@@ -204,9 +204,10 @@ struct ChatDetailView: View {
         let cached = supabase.cachedMessages(partnerId: partner.userId)
         if !cached.isEmpty {
             messages = cached.map { r in
+                var placeholder = false
                 let text: String = {
                     if let data = r.content.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        if obj["alg"] != nil && obj["ct"] != nil { return "[Encrypted message — restore chat key]" }
+                        if obj["alg"] != nil && obj["ct"] != nil { placeholder = true; return "encryption key missing for this chat" }
                     }
                     return r.content
                 }()
@@ -218,7 +219,8 @@ struct ChatDetailView: View {
                     attachments: r.attachments?.compactMap { a in
                         guard let u = a.url, let url = URL(string: u) else { return nil }
                         return ChatAttachment(url: url, type: a.type ?? "image")
-                    }
+                    },
+                    isPlaceholder: placeholder
                 )
             }
         }
@@ -258,22 +260,23 @@ struct ChatDetailView: View {
     @MainActor private func loadMessages() async {
         let rows = await supabase.syncMessages(partnerId: partner.userId)
         messages = rows.map { r in
+            var placeholder = false
             let text: String = {
                 if let data = r.content.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if obj["alg"] != nil && obj["ct"] != nil { return "[Encrypted message — restore chat key]" }
+                    if obj["alg"] != nil && obj["ct"] != nil { placeholder = true; return "end to end encryption key changed for this device" }
                 }
                 return r.content
             }()
-            MessageItem(
+            return MessageItem(
                 id: r.id,
-                // Determine direction by comparing to partner id to avoid relying on auth state timing
                 fromMe: r.sender_id != partner.userId,
                 text: text,
                 time: Self.relativeTime(r.created_at),
                 attachments: r.attachments?.compactMap { a in
                     guard let u = a.url, let url = URL(string: u) else { return nil }
                     return ChatAttachment(url: url, type: a.type ?? "image")
-                }
+                },
+                isPlaceholder: placeholder
             )
         }
     }
@@ -390,14 +393,16 @@ struct ChatDetailView: View {
     }
 }
 
-struct MessageItem: Identifiable { let id: String; let fromMe: Bool; let text: String; let time: String; let attachments: [ChatAttachment]? }
+struct MessageItem: Identifiable { let id: String; let fromMe: Bool; let text: String; let time: String; let attachments: [ChatAttachment]?; let isPlaceholder: Bool }
 
 private struct Bubble: View {
     let text: String
     let fromMe: Bool
+    var italic: Bool = false
     private let maxWidth: CGFloat = 280
     var body: some View {
         Text(text)
+            .italic(italic)
             .foregroundColor(fromMe ? Color.white : Color.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

@@ -648,6 +648,7 @@ final class SupabaseManager: ObservableObject {
         let description: String?
         let status: String
         let viewer_count: Int?
+        let taps: Int?
         let started_at: String?
         let ended_at: String?
         // Edge function may attach an ephemeral LiveKit token for host/viewer
@@ -1094,17 +1095,33 @@ final class SupabaseManager: ObservableObject {
 
     // MARK: - Lightweight DB fetches for live previews
     func fetchLiveStreamById(_ id: String) async throws -> DBLiveStream? {
-        struct Row: Decodable { let id: String; let host_id: String; let title: String; let description: String?; let status: String; let viewer_count: Int?; let started_at: String?; let ended_at: String? }
+        struct Row: Decodable { let id: String; let host_id: String; let title: String; let description: String?; let status: String; let viewer_count: Int?; let taps: Int?; let started_at: String?; let ended_at: String? }
         let res: PostgrestResponse<[Row]> = try await client
             .from("live_streams")
-            .select("id,host_id,title,description,status,viewer_count,started_at,ended_at")
+            .select("id,host_id,title,description,status,viewer_count,taps,started_at,ended_at")
             .eq("id", value: id)
             .limit(1)
             .execute()
         if let r = res.value.first {
-            return DBLiveStream(id: r.id, host_id: r.host_id, title: r.title, description: r.description, status: r.status, viewer_count: r.viewer_count, started_at: r.started_at, ended_at: r.ended_at, token: nil)
+            return DBLiveStream(id: r.id, host_id: r.host_id, title: r.title, description: r.description, status: r.status, viewer_count: r.viewer_count, taps: r.taps, started_at: r.started_at, ended_at: r.ended_at, token: nil)
         }
         return nil
+    }
+
+    // Realtime taps subscription
+    private var tapsChannels: [String: RealtimeChannelV2] = [:]
+    func subscribeToLiveTaps(streamId: String, onUpdate: @escaping (Int) -> Void) async {
+        if tapsChannels[streamId] != nil { return }
+        let ch = client.channel("live-taps-\(streamId.prefix(6))")
+        _ = ch.onPostgresChange(UpdateAction.self, schema: "public", table: "live_streams", filter: "id=eq.\(streamId)") { action in
+            let rec = action.record
+            if let taps = rec["taps"] as? Int { DispatchQueue.main.async { onUpdate(taps) } }
+        }
+        do { try await ch.subscribeWithError() } catch { return }
+        tapsChannels[streamId] = ch
+    }
+    func unsubscribeLiveTaps(streamId: String) async {
+        if let ch = tapsChannels.removeValue(forKey: streamId) { await ch.unsubscribe(); await client.removeChannel(ch) }
     }
 
     /// Active live stream for the current user as host (if any)

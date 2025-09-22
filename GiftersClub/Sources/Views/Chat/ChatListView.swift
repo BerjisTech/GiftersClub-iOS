@@ -133,6 +133,8 @@ struct ChatListView: View {
                 if looksEncrypted(content) {
                     if let raw = content, let peerPub = await supabase.fetchPublicKey(for: d.partner_id), let key = try? E2EEKeyManager.shared.sharedSecret(with: peerPub), let dec = try? E2EEKeyManager.shared.decrypt(raw, with: key) {
                         content = dec
+                    } else {
+                        content = "encryption key missing for this chat"
                     }
                 }
                 let item = ConversationItem(

@@ -179,7 +179,7 @@ struct LiveViewerView: View {
                 }
             }
             if let row = try? await supa.fetchLiveStreamById(live.id) {
-                _ = await MainActor.run { viewerCount = row.viewer_count ?? 0 }
+                _ = await MainActor.run { viewerCount = row.viewer_count ?? 0; totalTaps = row.taps ?? 0; lastTapsForRemote = totalTaps }
             }
             if hostProfile == nil, let p = try? await supa.fetchProfileByUserId(live.host_id) {
                 await MainActor.run { hostProfile = p }
@@ -369,6 +369,14 @@ struct LiveViewerView: View {
         .onChange(of: comments.last?.id) { _ in
             if let last = comments.last, last.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "liked the live" {
                 spawnRemoteHearts()
+            }
+        }
+        .task {
+            await supa.subscribeToLiveTaps(streamId: live.id) { taps in
+                let prev = totalTaps
+                totalTaps = taps
+                let delta = max(0, taps - prev)
+                if delta > 0 { for _ in 0..<min(6, delta) { spawnRemoteHearts() } }
             }
         }
     }
@@ -590,6 +598,15 @@ struct LiveViewerView: View {
                 Label("\(viewerCount)", systemImage: "eye.fill")
                     .foregroundStyle(.white.opacity(0.9))
                     .font(.footnote)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.35))
+            .clipShape(Capsule())
+
+            HStack(spacing: 6) {
+                Image(systemName: "heart.fill").foregroundStyle(.red)
+                Text("\(totalTaps)").foregroundStyle(.white).font(.footnote)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
