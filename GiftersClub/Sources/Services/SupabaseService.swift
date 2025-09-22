@@ -1202,6 +1202,15 @@ final class SupabaseManager: ObservableObject {
         return res.value.first
     }
 
+    // Increment live taps counter via RPC (best-effort, fire-and-forget OK)
+    func incrementLiveTaps(streamId: String, inc: Int = 1) async {
+        struct Params: Encodable { let in_stream_id: String; let in_inc: Int }
+        let params = Params(in_stream_id: streamId, in_inc: max(1, inc))
+        _ = try? await client
+            .rpc("increment_live_taps", params: params)
+            .execute()
+    }
+
     /// Fetch a live session via Edge Function (returns stream + viewer token)
     func fetchLiveSession(_ id: String) async throws -> DBLiveStream {
         var comps = URLComponents(url: SupabaseConfig.url.appendingPathComponent("functions/v1/live-session"), resolvingAgainstBaseURL: false)!

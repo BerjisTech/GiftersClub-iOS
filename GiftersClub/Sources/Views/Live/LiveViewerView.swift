@@ -53,6 +53,11 @@ struct LiveViewerView: View {
     @State private var amModerator: Bool = false
     @State private var showModeration: Bool = false
     @State private var modNewWord: String = ""
+    // Likes (taps)
+    @State private var tapHearts: [HeartParticle] = []
+    @State private var localTapCount: Int = 0
+    @State private var showTapHud: Bool = false
+    @State private var likeCommentSent: Bool = false
 
     var body: some View {
         ZStack {
@@ -89,6 +94,7 @@ struct LiveViewerView: View {
             if !ended {
                 VStack(spacing: 6) {
                     topBar
+                    if showTapHud { tapHud }
                     if battleActive { matchBar }
                     Spacer()
                     bottomBar
@@ -116,7 +122,20 @@ struct LiveViewerView: View {
                     .accessibilityIdentifier("GiftAnimationOverlay")
                 }
             }
+            // Floating hearts overlay
+            ForEach(tapHearts) { h in
+                Image(systemName: "heart.fill")
+                    .foregroundStyle(.red)
+                    .position(h.position)
+                    .opacity(h.opacity)
+                    .scaleEffect(h.scale)
+                    .allowsHitTesting(false)
+            }
         }
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0).onEnded { value in
+            spawnTap(at: value.location)
+        })
         .background(Color.black)
         .toolbar(.hidden, for: .navigationBar)
         .task {
@@ -142,6 +161,10 @@ struct LiveViewerView: View {
                         }
                         // Preload profile
                         Task { if profilesCache[c.user_id] == nil, let p = try? await supa.fetchProfileByUserId(c.user_id) { await MainActor.run { profilesCache[c.user_id] = p } } }
+                        // Trigger remote hearts when someone likes the live (content-only, username comes from profile)
+                        if c.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "liked the live" {
+                            spawnRemoteHearts()
+                        }
                     }
                     _ = await MainActor.run { commentSubscribedIds.insert(id) }
                 }
@@ -343,12 +366,84 @@ struct LiveViewerView: View {
                 }
             }
         }
+        .onChange(of: comments.last?.id) { _ in
+            if let last = comments.last, last.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "liked the live" {
+                spawnRemoteHearts()
+            }
+        }
     }
 
     private func shortUsername(for userId: String) -> String {
         if let p = profilesCache[userId] { return p.username.isEmpty ? (p.name ?? String(userId.prefix(6))) : p.username }
         Task { if let p = try? await supa.fetchProfileByUserId(userId) { await MainActor.run { profilesCache[userId] = p } } }
         return String(userId.prefix(6))
+    }
+
+    // HUD under host details showing progress towards 300 taps
+    private var tapHud: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "heart.fill").foregroundStyle(.red)
+            ProgressView(value: min(Double(localTapCount)/300.0, 1.0))
+                .tint(.red)
+                .frame(width: 120)
+            Text("\(min(localTapCount, 300))/300").font(.caption2).foregroundStyle(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.35))
+        .clipShape(Capsule())
+    }
+
+    private struct HeartParticle: Identifiable {
+        let id = UUID()
+        var position: CGPoint
+        var opacity: Double
+        var scale: CGFloat
+    }
+
+    private func spawnTap(at pt: CGPoint) {
+        var h = HeartParticle(position: pt, opacity: 1.0, scale: 1.0)
+        tapHearts.append(h)
+        withAnimation(.easeOut(duration: 1.2)) {
+            h.position.y -= 120
+            h.opacity = 0.0
+            h.scale = 1.4
+            if let idx = tapHearts.firstIndex(where: { $0.id == h.id }) { tapHearts[idx] = h }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
+            tapHearts.removeAll { $0.id == h.id }
+        }
+        localTapCount += 1
+        if localTapCount >= 10 { showTapHud = true }
+        Task { await supa.incrementLiveTaps(streamId: live.id, inc: 1) }
+        if !likeCommentSent {
+            likeCommentSent = true
+            Task { _ = try? await supa.sendLiveComment(streamId: live.id, content: "liked the live") }
+        }
+        if localTapCount == 300 {
+            giftAnimationText = "💥"; showGiftAnimation = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { showGiftAnimation = false }
+        }
+    }
+
+    private func spawnRemoteHearts() {
+        let size = UIScreen.main.bounds.size
+        for i in 0..<6 {
+            let base = CGPoint(x: size.width - 24, y: size.height - 120)
+            var h = HeartParticle(position: base, opacity: 0.9, scale: 1.0)
+            let delay = 0.05 * Double(i)
+            tapHearts.append(h)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withAnimation(.easeOut(duration: 1.2)) {
+                    h.position.y -= 140
+                    h.position.x -= CGFloat(Int.random(in: 0...40))
+                    h.opacity = 0.0
+                    h.scale = 1.2
+                    if let idx = tapHearts.firstIndex(where: { $0.id == h.id }) { tapHearts[idx] = h }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { tapHearts.removeAll { $0.id == h.id } }
+            }
+        }
     }
     private func requestToJoin() async {
         let ok = await supa.requestGuestInvite(streamId: live.id)
