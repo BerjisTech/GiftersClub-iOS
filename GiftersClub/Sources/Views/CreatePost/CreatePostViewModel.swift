@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 import AVFoundation
 
 enum PostAccessType: String, CaseIterable, Identifiable {
@@ -137,6 +138,7 @@ final class CreatePostViewModel: ObservableObject {
     }
 
     // MARK: - Local transcoding to MP4 for iOS compatibility
+    @MainActor
     private func transcodeToMP4(data: Data, suggestedType: UTType?) async -> Data? {
         // Write to a temporary file so AVAsset can read it
         let ext = suggestedType?.preferredFilenameExtension ?? "mov"
@@ -145,21 +147,41 @@ final class CreatePostViewModel: ObservableObject {
         let asset = AVAsset(url: inputURL)
         // Build a composition to normalize orientation and timescale
         let comp = AVMutableComposition()
-        guard
-            let videoTrack = asset.tracks(withMediaType: .video).first,
-            let compVideo = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
-        else {
+        var duration: CMTime = .zero
+        var transform: CGAffineTransform = .identity
+        var vTrack: AVAssetTrack?
+        var aTrack: AVAssetTrack?
+        if #available(iOS 16.0, *) {
+            do {
+                let vts = try await asset.loadTracks(withMediaType: .video)
+                vTrack = vts.first
+                duration = try await asset.load(.duration)
+                if let vt = vTrack { transform = (try? await vt.load(.preferredTransform)) ?? .identity }
+                let ats = try await asset.loadTracks(withMediaType: .audio)
+                aTrack = ats.first
+            } catch {
+                // If async loads fail on iOS 16+, gracefully abort transcoding using original data
+                return try? Data(contentsOf: inputURL)
+            }
+        } else {
+            vTrack = asset.tracks(withMediaType: .video).first
+            aTrack = asset.tracks(withMediaType: .audio).first
+            duration = asset.duration
+            transform = vTrack?.preferredTransform ?? .identity
+        }
+        guard let videoTrack = vTrack,
+              let compVideo = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
             return try? Data(contentsOf: inputURL)
         }
-        compVideo.preferredTransform = videoTrack.preferredTransform
+        compVideo.preferredTransform = transform
         do {
-            try compVideo.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: videoTrack, at: .zero)
+            try compVideo.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: videoTrack, at: .zero)
         } catch {
             return nil
         }
-        if let audioTrack = asset.tracks(withMediaType: .audio).first,
+        if let audioTrack = aTrack,
            let compAudio = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-            _ = try? compAudio.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: audioTrack, at: .zero)
+            _ = try? compAudio.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: audioTrack, at: .zero)
         }
         // Export to MP4 (H.264/AAC) using a safe preset
         let preset = AVAssetExportPreset1280x720

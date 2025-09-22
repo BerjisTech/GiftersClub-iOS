@@ -50,6 +50,11 @@ struct LiveBroadcastView: View {
     @State private var moderatorProfiles: [SupabaseManager.DBProfile] = []
     @State private var stickToBottom: Bool = true
     @State private var beautyPipeline: BeautyFilterPipeline? = nil
+    // Poster details & taps/hearts (host sees remote hearts and total taps)
+    @State private var hostProfile: SupabaseManager.DBProfile? = nil
+    @State private var totalTaps: Int = 0
+    private struct HeartParticle: Identifiable { let id = UUID(); var position: CGPoint; var opacity: Double; var scale: CGFloat }
+    @State private var tapHearts: [HeartParticle] = []
 
     var body: some View {
         ZStack {
@@ -79,8 +84,17 @@ struct LiveBroadcastView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
+            // Floating hearts overlay (remote hearts spawn at bottom-right)
+            ForEach(tapHearts) { h in
+                Image(systemName: "heart.fill")
+                    .foregroundStyle(.red)
+                    .position(h.position)
+                    .opacity(h.opacity)
+                    .scaleEffect(h.scale)
+                    .allowsHitTesting(false)
+            }
         }
-        .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil); Task { await goLiveIfNeeded(); await startHostPolling(); await startRealtimeComments(); await startRealtimeGifts() }; if startManagePanel { showManagePanel = true } }
+        .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil); Task { await goLiveIfNeeded(); await startHostPolling(); await startRealtimeComments(); await startRealtimeGifts(); await preloadHostProfile(); await subscribeToTaps() }; if startManagePanel { showManagePanel = true } }
         .onDisappear {
             NotificationCenter.default.post(name: .showBottomBar, object: nil)
             battleTimer?.invalidate(); battleTimer = nil
@@ -222,23 +236,49 @@ struct LiveBroadcastView: View {
     }
 
     private var topBar: some View {
-        HStack {
+        HStack(alignment: .center, spacing: 8) {
+            // Poster details (match Android viewer/host capsule)
+            HStack(spacing: 8) {
+                if let img = hostProfile?.image, let url = URL(string: img) {
+                    AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                        .frame(width: 28, height: 28)
+                        .clipShape(Circle())
+                } else { Circle().fill(Color.white.opacity(0.25)).frame(width: 28, height: 28) }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(hostProfile?.username ?? "").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                    if let f = hostProfile?.followers_count { Text("\(f) followers").font(.caption2).foregroundStyle(.white.opacity(0.9)) }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.35))
+            .clipShape(Capsule())
+
+            Spacer()
+
+            // Viewer count capsule
             HStack(spacing: 8) {
                 Circle().fill(isLive ? .red : .gray).frame(width: 8, height: 8)
-                Text("\(viewers) viewers")
-                    .font(.footnote)
+                Label("\(viewers)", systemImage: "eye.fill")
                     .foregroundStyle(.white.opacity(0.9))
+                    .font(.footnote)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color.black.opacity(0.35))
             .clipShape(Capsule())
             .contentShape(Rectangle())
-            .onTapGesture {
-                Task { await loadViewerProfiles(); await refreshModerators(); await MainActor.run { showViewerList = true } }
-            }
+            .onTapGesture { Task { await loadViewerProfiles(); await refreshModerators(); await MainActor.run { showViewerList = true } } }
 
-            Spacer()
+            // Tap count capsule (heart + taps)
+            HStack(spacing: 6) {
+                Image(systemName: "heart.fill").foregroundStyle(.red)
+                Text("\(totalTaps)").foregroundStyle(.white).font(.footnote)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.35))
+            .clipShape(Capsule())
 
             Button { ending = true } label: {
                 Text("End")
@@ -499,7 +539,11 @@ struct LiveBroadcastView: View {
         commentsTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
             Task {
                 if let row = try? await supa.fetchLiveStreamById(stream.id) {
-                    await MainActor.run { viewers = row.viewer_count ?? 0 }
+                    let prev = await MainActor.run { totalTaps }
+                    await MainActor.run { viewers = row.viewer_count ?? 0; totalTaps = row.taps ?? totalTaps }
+                    let now = await MainActor.run { totalTaps }
+                    let delta = max(0, now - prev)
+                    if delta > 0 { await MainActor.run { for _ in 0..<min(6, delta) { spawnRemoteHearts() } } }
                 }
                 // Refresh comments alongside Realtime to ensure host sees existing thread
                 let ids = await MainActor.run { cohostStreamIds.isEmpty ? [stream.id] : cohostStreamIds }
@@ -515,6 +559,35 @@ struct LiveBroadcastView: View {
                 }
             }
         }
+    }
+
+    private func preloadHostProfile() async {
+        if hostProfile == nil, let p = try? await supa.fetchProfileByUserId(stream.host_id) {
+            await MainActor.run { hostProfile = p }
+        }
+    }
+
+    private func subscribeToTaps() async {
+        await supa.subscribeToLiveTaps(streamId: stream.id) { taps in
+            let prev = totalTaps
+            totalTaps = taps
+            let delta = max(0, taps - prev)
+            if delta > 0 { for _ in 0..<min(6, delta) { spawnRemoteHearts() } }
+        }
+    }
+
+    private func spawnRemoteHearts() {
+        let size = UIScreen.main.bounds.size
+        var h = HeartParticle(position: CGPoint(x: size.width - 24, y: size.height - 120), opacity: 0.9, scale: 1.0)
+        tapHearts.append(h)
+        withAnimation(.easeOut(duration: 1.2)) {
+            h.position.y -= 140
+            h.position.x -= CGFloat(Int.random(in: 0...40))
+            h.opacity = 0.0
+            h.scale = 1.2
+            if let idx = tapHearts.firstIndex(where: { $0.id == h.id }) { tapHearts[idx] = h }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { tapHearts.removeAll { $0.id == h.id } }
     }
 
     private var matchBar: some View {
@@ -831,5 +904,5 @@ struct LiveBroadcastView: View {
 }
 
 #Preview {
-    LiveBroadcastView(stream: .init(id: UUID().uuidString, host_id: UUID().uuidString, title: "My Stream", description: "", status: "scheduled", viewer_count: 0, started_at: nil, ended_at: nil, token: "tok"))
+    LiveBroadcastView(stream: .init(id: UUID().uuidString, host_id: UUID().uuidString, title: "My Stream", description: "", status: "scheduled", viewer_count: 0, taps: 0, started_at: nil, ended_at: nil, token: "tok"))
 }

@@ -58,6 +58,9 @@ struct LiveViewerView: View {
     @State private var localTapCount: Int = 0
     @State private var showTapHud: Bool = false
     @State private var likeCommentSent: Bool = false
+    @State private var totalTaps: Int = 0
+    @State private var lastTapsForRemote: Int = 0
+    @State private var chaff: [HeartParticle] = []
 
     var body: some View {
         ZStack {
@@ -94,7 +97,6 @@ struct LiveViewerView: View {
             if !ended {
                 VStack(spacing: 6) {
                     topBar
-                    if showTapHud { tapHud }
                     if battleActive { matchBar }
                     Spacer()
                     bottomBar
@@ -129,6 +131,15 @@ struct LiveViewerView: View {
                     .position(h.position)
                     .opacity(h.opacity)
                     .scaleEffect(h.scale)
+                    .allowsHitTesting(false)
+            }
+            // Chaff/confetti overlay (falls downward then fades)
+            ForEach(chaff) { p in
+                Text("•")
+                    .foregroundStyle(.white)
+                    .position(p.position)
+                    .opacity(p.opacity)
+                    .scaleEffect(p.scale)
                     .allowsHitTesting(false)
             }
         }
@@ -387,7 +398,7 @@ struct LiveViewerView: View {
         return String(userId.prefix(6))
     }
 
-    // HUD under host details showing progress towards 300 taps
+    // HUD under host details showing progress towards 300 taps (legacy; not shown anymore)
     private var tapHud: some View {
         HStack(spacing: 8) {
             Image(systemName: "heart.fill").foregroundStyle(.red)
@@ -422,16 +433,12 @@ struct LiveViewerView: View {
             tapHearts.removeAll { $0.id == h.id }
         }
         localTapCount += 1
-        if localTapCount >= 10 { showTapHud = true }
         Task { await supa.incrementLiveTaps(streamId: live.id, inc: 1) }
         if !likeCommentSent {
             likeCommentSent = true
             Task { _ = try? await supa.sendLiveComment(streamId: live.id, content: "liked the live") }
         }
-        if localTapCount == 300 {
-            giftAnimationText = "💥"; showGiftAnimation = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { showGiftAnimation = false }
-        }
+        if localTapCount == 300 { spawnChaffAtCounter() }
     }
 
     private func spawnRemoteHearts() {
@@ -450,6 +457,25 @@ struct LiveViewerView: View {
                     if let idx = tapHearts.firstIndex(where: { $0.id == h.id }) { tapHearts[idx] = h }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { tapHearts.removeAll { $0.id == h.id } }
+            }
+        }
+    }
+
+    private func spawnChaffAtCounter() {
+        let size = UIScreen.main.bounds.size
+        for i in 0..<24 {
+            var p = HeartParticle(position: CGPoint(x: size.width - CGFloat(Int.random(in: 80...140)), y: 60), opacity: 1.0, scale: 1.0)
+            chaff.append(p)
+            let delay = 0.02 * Double(i)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withAnimation(.easeOut(duration: 1.2)) {
+                    p.position.y += CGFloat(Int.random(in: 120...240))
+                    p.position.x += CGFloat(Int.random(in: -30...30))
+                    p.opacity = 0.0
+                    p.scale = 1.0
+                    if let idx = chaff.firstIndex(where: { $0.id == p.id }) { chaff[idx] = p }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { chaff.removeAll { $0.id == p.id } }
             }
         }
     }
@@ -606,6 +632,14 @@ struct LiveViewerView: View {
 
             HStack(spacing: 6) {
                 Image(systemName: "heart.fill").foregroundStyle(.red)
+                if localTapCount >= 30 && localTapCount < 300 {
+                    ProgressView(value: min(Double(localTapCount)/300.0, 1.0))
+                        .tint(.red)
+                        .frame(width: 100)
+                    Text("\(min(localTapCount, 300))/300")
+                        .foregroundStyle(.white)
+                        .font(.caption2)
+                }
                 Text("\(totalTaps)").foregroundStyle(.white).font(.footnote)
             }
             .padding(.horizontal, 10)

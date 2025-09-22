@@ -238,7 +238,8 @@ struct ChatDetailView: View {
                         attachments: msg.attachments?.compactMap { a in
                             guard let u = a.url, let url = URL(string: u) else { return nil }
                             return ChatAttachment(url: url, type: a.type ?? "image")
-                        }
+                        },
+                        isPlaceholder: false
                     )
                     messages.append(mapped)
                 }
@@ -303,7 +304,7 @@ struct ChatDetailView: View {
                 // Shimmer placeholder for attachment
                 let phId = "local-\(name)"
                 let ph = ChatAttachment(url: nil, type: "file")
-                messages.append(MessageItem(id: phId, fromMe: true, text: "", time: "now", attachments: [ph]))
+                messages.append(MessageItem(id: phId, fromMe: true, text: "", time: "now", attachments: [ph], isPlaceholder: false))
                 selectedDocURL = nil
                 let publicUrl = try await supabase.uploadMedia(bytes: data, fileName: name, mimeType: mime, bucket: "post")
                 attachments.append(.init(url: publicUrl, type: "file"))
@@ -331,7 +332,7 @@ struct ChatDetailView: View {
                 // Insert shimmer placeholder message on my side while uploading and hide preview immediately
                 let phId = "local-\(name)"
                 let ph = ChatAttachment(url: nil, type: mime.hasPrefix("image/") ? "image" : (mime.hasPrefix("video/") ? "video" : "file"))
-                messages.append(MessageItem(id: phId, fromMe: true, text: "", time: "now", attachments: [ph]))
+                messages.append(MessageItem(id: phId, fromMe: true, text: "", time: "now", attachments: [ph], isPlaceholder: false))
                 selectedData = nil; selectedPreview = nil; selectedMime = nil; selectedItem = nil
                 let publicUrl = try await supabase.uploadMedia(bytes: data, fileName: name, mimeType: mime, bucket: "post")
                 let kind = mime.hasPrefix("image/") ? "image" : (mime.hasPrefix("video/") ? "video" : "file")
