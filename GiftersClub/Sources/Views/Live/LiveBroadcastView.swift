@@ -495,6 +495,13 @@ struct LiveBroadcastView: View {
             _ = try await supa.updateLiveSession(id: stream.id, updates: ["status": "live", "started_at": iso])
             // Connect to LiveKit and publish camera+mic
             try await publisher.connectAndPublish(url: SupabaseConfig.livekitURL, token: token)
+            // Listen for data messages like {"type":"tap"} from viewers
+            publisher.onData = { type in
+                if type == "tap" {
+                    spawnRemoteHearts()
+                    totalTaps += 1
+                }
+            }
             await MainActor.run { isLive = true }
             // Load battle state (if any) and start tally polling
             var activeBattle: SupabaseManager.DBBattleSession? = nil

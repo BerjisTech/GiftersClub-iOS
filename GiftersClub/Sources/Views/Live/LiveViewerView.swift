@@ -754,6 +754,13 @@ struct LiveViewerView: View {
             guard let tok = token, !tok.isEmpty else {
                 throw NSError(domain: "LiveKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing LiveKit token"]) }
             try await viewer.connect(url: SupabaseConfig.livekitURL, token: tok)
+            // Receive LiveKit data messages (e.g., tap events from other clients)
+            viewer.onData = { type in
+                if type == "tap" {
+                    spawnRemoteHearts()
+                    totalTaps += 1
+                }
+            }
             // In case tracks were already present, try to bind first available video
             if viewer.remoteVideoTrack == nil {
                 // No-op here: LiveKitViewer will set via delegate when subscribed

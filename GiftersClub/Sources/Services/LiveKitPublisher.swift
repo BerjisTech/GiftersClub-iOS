@@ -18,6 +18,7 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
 
     let room = Room()
     private var trackPollTimer: Timer? = nil
+    var onData: ((String) -> Void)? = nil
 
     override init() {
         super.init()
@@ -79,6 +80,12 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
     }
 
     // RoomDelegate methods are optional; we rely on direct state after publish/toggles.
+    func room(_ room: Room, didReceive data: Data, participant: RemoteParticipant?) {
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let type = obj["type"] as? String {
+            onData?(type)
+        }
+    }
 
     private func startTrackPolling() {
         trackPollTimer?.invalidate()

@@ -16,6 +16,8 @@ final class LiveKitViewer: NSObject, ObservableObject, RoomDelegate {
 
     private let room = Room()
     private var trackPollTimer: Timer? = nil
+    // Callback for lightweight data messages like {"type":"tap"}
+    var onData: ((String) -> Void)? = nil
 
     override init() {
         super.init()
@@ -62,6 +64,14 @@ final class LiveKitViewer: NSObject, ObservableObject, RoomDelegate {
                 }
                 self.remoteVideos = videos
             }
+        }
+    }
+
+    // LiveKit RoomDelegate: receive data messages from participants
+    func room(_ room: Room, didReceive data: Data, participant: RemoteParticipant?) {
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let type = obj["type"] as? String {
+            onData?(type)
         }
     }
 
