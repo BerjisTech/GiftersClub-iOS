@@ -6,7 +6,13 @@ final class BackgroundUploadManager: NSObject, URLSessionTaskDelegate, URLSessio
 
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: "club.gifters.giftersclub.uploads")
+        // Ensure uploads proceed quickly and reliably across network types
         config.isDiscretionary = false
+        config.allowsCellularAccess = true
+        if #available(iOS 13.0, *) {
+            config.allowsConstrainedNetworkAccess = true
+            config.waitsForConnectivity = true
+        }
         config.sharedContainerIdentifier = nil
         config.sessionSendsLaunchEvents = true
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
