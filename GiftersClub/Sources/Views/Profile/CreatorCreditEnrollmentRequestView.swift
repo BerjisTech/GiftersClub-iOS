@@ -52,9 +52,38 @@ struct CreatorCreditEnrollmentRequestView: View {
     private var buttonTitle: String { existing == nil ? "Request" : "Re-request" }
 
     @ViewBuilder private func statusView(_ e: SupabaseManager.DBCreatorCreditEnrollment) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Current status: \(e.status.capitalized)").font(.headline)
-            if let reason = e.reject_reason, !reason.isEmpty { Text("Reason: \(reason)") }
+            if e.status.lowercased() == "rejected" {
+                Text("We reviewed your account and concluded that it does not currently meet one or more criteria for Creator Credits.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("How to improve your chances")
+                    .font(.headline)
+                VStack(alignment: .leading, spacing: 8) {
+                    bullet("Audience size", detail: "At least ~1,000 followers.")
+                    bullet("Consistent content", detail: "Regular uploads in a consistent niche/field.")
+                    bullet("Cumulative views", detail: "10,000+ total views across posts.")
+                    bullet("Trust & safety", detail: "Low reports, never being blocked for violations.")
+                    bullet("Family‑friendly", detail: "Content must be safe for a broad audience.")
+                    bullet("Engagement quality", detail: "Healthy likes and especially comments; considerate replies to comments.")
+                }
+                HStack {
+                    Spacer()
+                    GradientButton(title: "Re‑enroll") {
+                        Task { await submit() }
+                    }
+                    .disabled(submitting || !accepted)
+                }
+            } else if e.status.lowercased() == "accepted" {
+                Text("You’re enrolled and eligible for Creator Credits per program rules.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Your request is under review. We’ll notify you once it’s processed.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
@@ -85,4 +114,3 @@ struct CreatorCreditEnrollmentRequestView: View {
         }
     }
 }
-

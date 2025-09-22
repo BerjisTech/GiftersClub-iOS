@@ -606,38 +606,54 @@ struct PostPageView: View {
                             .offset(y: 12)
                         }
                     }
-                    VStack(spacing: 10) {
-                        VStack(spacing: 4) {
-                            Image(systemName: post.isLiked ? "heart.fill" : "heart")
-                                .foregroundStyle(post.isLiked ? .red : .white)
-                                .font(.title2.weight(.semibold))
-                            Text("\(post.likes)").foregroundStyle(.white).font(.caption2)
+                    VStack(spacing: 14) {
+                        Button(action: { toggleLike(showBurst: true) }) {
+                            VStack(spacing: 6) {
+                                Image(systemName: post.isLiked ? "heart.fill" : "heart")
+                                    .foregroundStyle(post.isLiked ? .red : .white)
+                                    .font(.system(size: 28, weight: .semibold))
+                                Text("\(post.likes)").foregroundStyle(.white).font(.caption)
+                            }
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                         }
-                        .onTapGesture { toggleLike(showBurst: true) }
+                        .buttonStyle(.plain)
 
-                        VStack(spacing: 4) {
-                            Image(systemName: "message.fill")
-                                .foregroundStyle(.white)
-                                .font(.title2.weight(.semibold))
-                            Text("\(post.comments)").foregroundStyle(.white).font(.caption2)
+                        Button(action: { CommentsPresenter.shared.present(postId: post.id) }) {
+                            VStack(spacing: 6) {
+                                Image(systemName: "message.fill")
+                                    .foregroundStyle(.white)
+                                    .font(.system(size: 28, weight: .semibold))
+                                Text("\(post.comments)").foregroundStyle(.white).font(.caption)
+                            }
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                         }
-                        .onTapGesture { CommentsPresenter.shared.present(postId: post.id) }
+                        .buttonStyle(.plain)
 
-                        VStack(spacing: 4) {
-                            Image(systemName: "arrowshape.turn.up.forward.fill")
-                                .foregroundStyle(.white)
-                                .font(.title2.weight(.semibold))
-                            Text("\(post.shares)").foregroundStyle(.white).font(.caption2)
+                        Button(action: { share() }) {
+                            VStack(spacing: 6) {
+                                Image(systemName: "arrowshape.turn.up.forward.fill")
+                                    .foregroundStyle(.white)
+                                    .font(.system(size: 28, weight: .semibold))
+                                Text("\(post.shares)").foregroundStyle(.white).font(.caption)
+                            }
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                         }
-                        .onTapGesture { share() }
+                        .buttonStyle(.plain)
 
-                        VStack(spacing: 4) {
-                            Image(systemName: "arrow.2.squarepath")
-                                .foregroundStyle(.white)
-                                .font(.title2.weight(.semibold))
-                            Text("\(repostCount)").foregroundStyle(.white).font(.caption2)
+                        Button(action: { repost() }) {
+                            VStack(spacing: 6) {
+                                Image(systemName: "arrow.2.squarepath")
+                                    .foregroundStyle(.white)
+                                    .font(.system(size: 28, weight: .semibold))
+                                Text("\(repostCount)").foregroundStyle(.white).font(.caption)
+                            }
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                         }
-                        .onTapGesture { repost() }
+                        .buttonStyle(.plain)
                     }
                 }
 .padding(.trailing, 0)
