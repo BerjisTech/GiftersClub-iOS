@@ -14,8 +14,10 @@ struct ChatDetailView: View {
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var selectedData: Data? = nil
     @State private var selectedMime: String? = nil
+    @State private var selectedPreview: Data? = nil
     @State private var selectedDocURL: URL? = nil
     @State private var showDocImporter: Bool = false
+    @State private var showPhotoPicker: Bool = false
     @State private var isSending: Bool = false
 
     @State private var showDeleteConversationConfirm = false
@@ -65,14 +67,14 @@ struct ChatDetailView: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 8) {
-                if let data = selectedData {
+                if let data = selectedPreview ?? selectedData {
                     HStack(spacing: 10) {
                         AttachmentPreview(data: data, mime: selectedMime)
                             .frame(width: 64, height: 64)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                         Spacer()
                         Button {
-                            selectedData = nil; selectedMime = nil; selectedItem = nil
+                            selectedData = nil; selectedPreview = nil; selectedMime = nil; selectedItem = nil; selectedDocURL = nil
                         } label: {
                             Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
                         }
@@ -82,32 +84,47 @@ struct ChatDetailView: View {
                 }
                 HStack(spacing: 8) {
                 Menu {
-                    PhotosPicker(selection: $selectedItem, matching: .any(of: [.images, .videos])) {
+                    Button {
+                        showPhotoPicker = true
+                    } label: {
                         Label("Photo or Video", systemImage: "photo.on.rectangle")
                     }
-                    Button {
-                        showDocImporter = true
-                    } label: {
+                    Button { showDocImporter = true } label: {
                         Label("Document", systemImage: "doc")
                     }
                 } label: {
                     Image(systemName: (selectedData != nil || selectedDocURL != nil || selectedItem != nil) ? "checkmark.circle.fill" : "paperclip")
                         .font(.title3)
                 }
+                // Present Photos picker outside of Menu to avoid presentation issues
+                .photosPicker(isPresented: $showPhotoPicker, selection: $selectedItem, matching: .any(of: [.images, .videos]))
                 .onChange(of: selectedItem, perform: { item in
                     guard let item else { return }
                     // Do not eagerly load large files; just record that a selection exists and enable Send
-                    selectedData = nil
-                    selectedMime = item.supportedContentTypes.first?.preferredMIMEType ?? nil
+                    selectedData = nil; selectedPreview = nil
+                    let mime = item.supportedContentTypes.first?.preferredMIMEType
+                    selectedMime = mime
+                    Task {
+                        // Best-effort lightweight preview: load Data and downscale if it's an image
+                        if let data = try? await item.loadTransferable(type: Data.self) {
+                            if (mime ?? "").hasPrefix("image/"), let ui = UIImage(data: data), let jpeg = ui.jpegData(compressionQuality: 0.6) {
+                                await MainActor.run { selectedPreview = jpeg }
+                            } else {
+                                await MainActor.run { selectedPreview = Data() }
+                            }
+                        } else {
+                            await MainActor.run { selectedPreview = Data() }
+                        }
+                    }
                 })
                 .fileImporter(isPresented: $showDocImporter, allowedContentTypes: [UTType.data], allowsMultipleSelection: false) { res in
                     switch res {
                     case .success(let urls):
                         selectedDocURL = urls.first
-                        selectedData = nil
-                        selectedMime = nil
+                        selectedData = nil; selectedPreview = Data()
+                        selectedMime = urls.first.flatMap { mimeType(for: $0) } ?? "application/octet-stream"
                     case .failure:
-                        selectedDocURL = nil
+                        selectedDocURL = nil; selectedPreview = nil
                     }
                 }
                 TextField("Message", text: $input)
@@ -261,6 +278,9 @@ struct ChatDetailView: View {
             var attachments: [SupabaseManager.MessageAttachment] = []
             // If a document was picked, upload it as a file type
             if let doc = selectedDocURL {
+                var didAccess = false
+                if doc.startAccessingSecurityScopedResource() { didAccess = true }
+                defer { if didAccess { doc.stopAccessingSecurityScopedResource() } }
                 let data = try Data(contentsOf: doc)
                 let mime = mimeType(for: doc) ?? "application/octet-stream"
                 let ext = doc.pathExtension.isEmpty ? (mime.split(separator: "/").last.map(String.init) ?? "bin") : doc.pathExtension
@@ -297,7 +317,7 @@ struct ChatDetailView: View {
                 let phId = "local-\(name)"
                 let ph = ChatAttachment(url: nil, type: mime.hasPrefix("image/") ? "image" : (mime.hasPrefix("video/") ? "video" : "file"))
                 messages.append(MessageItem(id: phId, fromMe: true, text: "", time: "now", attachments: [ph]))
-                selectedData = nil; selectedMime = nil; selectedItem = nil
+                selectedData = nil; selectedPreview = nil; selectedMime = nil; selectedItem = nil
                 let publicUrl = try await supabase.uploadMedia(bytes: data, fileName: name, mimeType: mime, bucket: "post")
                 let kind = mime.hasPrefix("image/") ? "image" : (mime.hasPrefix("video/") ? "video" : "file")
                 attachments.append(.init(url: publicUrl, type: kind))
@@ -307,7 +327,7 @@ struct ChatDetailView: View {
             } else {
                 _ = try await supabase.sendMessage(to: partner.userId, content: text, attachments: attachments)
             }
-            selectedData = nil; selectedMime = nil; selectedItem = nil
+            selectedData = nil; selectedPreview = nil; selectedMime = nil; selectedItem = nil; selectedDocURL = nil
             await markRead()
             await loadMessages()
             isSending = false
