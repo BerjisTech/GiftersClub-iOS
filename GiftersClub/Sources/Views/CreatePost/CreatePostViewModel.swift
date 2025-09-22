@@ -91,12 +91,15 @@ final class CreatePostViewModel: ObservableObject {
             await MainActor.run { isPosting = true; errorMessage = nil }
             do {
                 let postId = try await createPostRow()
+                // Register background upload tracking for profile shimmer
+                await UploadTracker.shared.startPost(id: postId, total: media.count)
                 // Kick off uploads in background without blocking UI
                 for (idx, m) in media.enumerated() {
                     Task.detached {
                         let filename = "\(postId)-\(Int(Date().timeIntervalSince1970))-\(idx).\(self.fileExtension(for: m.mime))"
                         if let publicUrl = try? await SupabaseManager.shared.uploadMedia(bytes: m.data, fileName: filename, mimeType: m.mime, bucket: "post") {
                             _ = try? await SupabaseManager.shared.insertPostMedia(postId: postId, mediaType: m.kind == .video ? "video" : "photo", url: publicUrl, order: idx)
+                            await UploadTracker.shared.incrementPost(id: postId)
                         }
                     }
                 }

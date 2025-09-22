@@ -446,6 +446,7 @@ private struct PostsGrid2View: View {
     let profileAvatar: URL?
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
     @ObservedObject private var supabase = SupabaseManager.shared
+    @ObservedObject private var uploads = UploadTracker.shared
     @State private var paywallPost: SupabaseManager.UserPostMinimal? = nil
     @State private var unlocked: Set<String> = []
     @State private var showViewer = false
@@ -454,11 +455,36 @@ private struct PostsGrid2View: View {
     @State private var selectedIds: Set<String> = []
     var body: some View {
         if posts.isEmpty {
-            VStack(spacing: 8) { Text("No posts yet").foregroundStyle(.secondary) }
-                .padding(.vertical, 16)
+            if isSelfView, !uploads.postIds.isEmpty {
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(uploads.postIds, id: \.self) { _ in
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06))
+                            ShimmerView().clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .frame(height: 220)
+                    }
+                }
+                .padding(.vertical, 8)
+            } else {
+                VStack(spacing: 8) { Text("No posts yet").foregroundStyle(.secondary) }
+                    .padding(.vertical, 16)
+            }
         } else {
             ZStack(alignment: .bottom) {
                 LazyVGrid(columns: columns, spacing: 8) {
+                    // If viewing own profile, show shimmer placeholders for any in-progress posts not yet loaded from server
+                    if isSelfView {
+                        let currentIds = Set(posts.map { $0.id })
+                        let missing = uploads.postIds.filter { !currentIds.contains($0) }
+                        ForEach(missing, id: \.self) { pid in
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06))
+                                ShimmerView().clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                            .frame(height: 220)
+                        }
+                    }
                     ForEach(Array(posts.enumerated()), id: \.1.id) { idx, p in
                         let media: LockablePostCard.MediaKind? = {
                             if let first = p.media?.first, let u = first.url, let url = URL(string: u) {
@@ -479,6 +505,15 @@ private struct PostsGrid2View: View {
                                     else { startIndex = idx; showViewer = true }
                                 }
                             )
+                            // Shimmer overlay while this post's media uploads in background
+                            .overlay {
+                                if isSelfView && uploads.isUploading(postId: p.id) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.08))
+                                        ShimmerView().clipShape(RoundedRectangle(cornerRadius: 12))
+                                    }
+                                }
+                            }
                             .highPriorityGesture(LongPressGesture(minimumDuration: 0.25).onEnded { _ in
                                 if isSelfView {
                                     selecting = true
