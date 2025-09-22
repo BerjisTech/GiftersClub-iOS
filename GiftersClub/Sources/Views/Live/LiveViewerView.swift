@@ -378,7 +378,7 @@ struct LiveViewerView: View {
             }
         }
         .onChange(of: comments.last?.id) { _ in
-            if let last = comments.last, last.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "liked the live" {
+            if let last = comments.last, last.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "liked this live" {
                 spawnRemoteHearts()
             }
         }
@@ -440,7 +440,7 @@ struct LiveViewerView: View {
         viewer.sendTap()
         if !likeCommentSent {
             likeCommentSent = true
-            Task { _ = try? await supa.sendLiveComment(streamId: live.id, content: "liked the live") }
+            Task { _ = try? await supa.sendLiveComment(streamId: live.id, content: "liked this live") }
         }
         if localTapCount == 300 { spawnChaffAtCounter() }
     }

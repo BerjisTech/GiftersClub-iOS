@@ -1228,9 +1228,29 @@ final class SupabaseManager: ObservableObject {
     func incrementLiveTaps(streamId: String, inc: Int = 1) async {
         struct Params: Encodable { let in_stream_id: String; let in_inc: Int }
         let params = Params(in_stream_id: streamId, in_inc: max(1, inc))
-        _ = try? await client
-            .rpc("increment_live_taps", params: params)
-            .execute()
+        do {
+            _ = try await client
+                .rpc("increment_live_taps", params: params)
+                .execute()
+            return
+        } catch {
+            // Fallback via direct HTTP RPC call (in case of client RPC failure)
+            do {
+                var req = URLRequest(url: SupabaseConfig.url.appendingPathComponent("rest/v1/rpc/increment_live_taps"))
+                req.httpMethod = "POST"
+                req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.addValue("application/json", forHTTPHeaderField: "Accept")
+                // Ensure PostgREST treats body as a single JSON object
+                req.addValue("params=single-object", forHTTPHeaderField: "Prefer")
+                // Return representation so caches/listeners can respond immediately (optional)
+                req.addValue("return=representation", forHTTPHeaderField: "Prefer")
+                req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+                if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+                let body = try JSONEncoder().encode(params)
+                req.httpBody = body
+                _ = try await URLSession.shared.data(for: req)
+            } catch { /* swallow */ }
+        }
     }
 
     /// Fetch a live session via Edge Function (returns stream + viewer token)
