@@ -434,6 +434,8 @@ struct LiveViewerView: View {
         }
         localTapCount += 1
         Task { await supa.incrementLiveTaps(streamId: live.id, inc: 1) }
+        // Also send a realtime tap signal via LiveKit so cross‑platform hosts see hearts immediately
+        viewer.sendTap()
         if !likeCommentSent {
             likeCommentSent = true
             Task { _ = try? await supa.sendLiveComment(streamId: live.id, content: "liked the live") }
@@ -579,85 +581,60 @@ struct LiveViewerView: View {
     }
 
     private var topBar: some View {
-        HStack(alignment: .center, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            // Streamer details box (avatar + username/followers + follow + viewer count)
             HStack(spacing: 8) {
                 if let img = hostProfile?.image, let url = URL(string: img) {
                     AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
-                        .frame(width: 28, height: 28)
+                        .frame(width: 40, height: 40)
                         .clipShape(Circle())
-                } else {
-                    Circle().fill(Color.white.opacity(0.25)).frame(width: 28, height: 28)
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(hostProfile?.username ?? "")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                } else { Circle().fill(Color.white.opacity(0.25)).frame(width: 40, height: 40) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(hostProfile?.username ?? "").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                     if let f = hostFollowersOverride ?? hostProfile?.followers_count {
-                        Text("\(f) followers")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.9))
+                        Text("\(f) followers").font(.caption2).foregroundStyle(.white.opacity(0.9))
                     }
                 }
+                Spacer(minLength: 8)
                 if let me = supa.user?.id.uuidString, me != live.host_id {
                     Button(action: { Task { await toggleFollow() } }) {
                         Image(systemName: (isFollowing ?? false) ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.plus")
                             .foregroundStyle(.white)
+                            .frame(width: 28, height: 28)
                     }
-                    .padding(.leading, 6)
                 }
-                if amModerator {
-                    Button(action: { showModeration = true }) {
-                        Image(systemName: "hand.raised").foregroundStyle(.white)
-                    }
-                    .padding(.leading, 6)
+                HStack(spacing: 6) {
+                    Image(systemName: "eye.fill").foregroundStyle(.white)
+                    Text("\(viewerCount)").foregroundStyle(.white).font(.footnote)
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(Color.black.opacity(0.35))
-            .clipShape(Capsule())
+            .background(.black.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            Spacer()
-
+            // Taps details row (heart + progress(>=30) + fraction + total taps)
             HStack(spacing: 8) {
-                Circle().fill(.red).frame(width: 8, height: 8)
-                Label("\(viewerCount)", systemImage: "eye.fill")
-                    .foregroundStyle(.white.opacity(0.9))
-                    .font(.footnote)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.black.opacity(0.35))
-            .clipShape(Capsule())
-
-            HStack(spacing: 6) {
                 Image(systemName: "heart.fill").foregroundStyle(.red)
                 if localTapCount >= 30 && localTapCount < 300 {
                     ProgressView(value: min(Double(localTapCount)/300.0, 1.0))
                         .tint(.red)
-                        .frame(width: 100)
-                    Text("\(min(localTapCount, 300))/300")
-                        .foregroundStyle(.white)
-                        .font(.caption2)
+                        .frame(width: 80)
+                    Text("\(min(localTapCount, 300))/300").font(.caption2).foregroundStyle(.white)
                 }
-                Text("\(totalTaps)").foregroundStyle(.white).font(.footnote)
+                Text(shortCount(totalTaps)).foregroundStyle(.white).font(.footnote)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color.black.opacity(0.35))
             .clipShape(Capsule())
-
-            // Removed request button from top bar to avoid squeezing username
-            Button { Task { await viewer.disconnect(); await MainActor.run { dismiss() } } } label: {
-                Text("Close")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.35))
-                    .clipShape(Capsule())
-            }
         }
+    }
+
+    private func shortCount(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fm", Double(n)/1_000_000.0) }
+        if n >= 1_000 { return String(format: "%.1fk", Double(n)/1_000.0) }
+        return String(n)
     }
 
     private var bottomBar: some View {

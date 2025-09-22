@@ -75,6 +75,14 @@ final class LiveKitViewer: NSObject, ObservableObject, RoomDelegate {
         trackPollTimer?.invalidate(); trackPollTimer = nil
     }
 
+    /// Send a lightweight tap signal over LiveKit data channel so all participants can animate hearts.
+    func sendTap() {
+        let obj: [String: Any] = ["type": "tap", "ts": Int(Date().timeIntervalSince1970)]
+        if let data = try? JSONSerialization.data(withJSONObject: obj) {
+            Task { try? await room.localParticipant.publish(data: data) }
+        }
+    }
+
     /// Upgrade from viewer to guest publisher (disconnect and reconnect with guest token)
     func upgradeToGuest(url: URL, token: String) async throws {
         await room.disconnect()

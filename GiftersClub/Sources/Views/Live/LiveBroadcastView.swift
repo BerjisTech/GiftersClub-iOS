@@ -236,81 +236,63 @@ struct LiveBroadcastView: View {
     }
 
     private var topBar: some View {
-        HStack(alignment: .center, spacing: 8) {
-            // Poster details (match Android viewer/host capsule)
+        HStack(alignment: .top, spacing: 8) {
+            // Streamer details box (avatar + username/followers)
             HStack(spacing: 8) {
                 if let img = hostProfile?.image, let url = URL(string: img) {
                     AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
-                        .frame(width: 28, height: 28)
+                        .frame(width: 40, height: 40)
                         .clipShape(Circle())
-                } else { Circle().fill(Color.white.opacity(0.25)).frame(width: 28, height: 28) }
-                VStack(alignment: .leading, spacing: 0) {
+                } else { Circle().fill(Color.white.opacity(0.25)).frame(width: 40, height: 40) }
+                VStack(alignment: .leading, spacing: 2) {
                     Text(hostProfile?.username ?? "").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                     if let f = hostProfile?.followers_count { Text("\(f) followers").font(.caption2).foregroundStyle(.white.opacity(0.9)) }
+                    HStack(spacing: 6) {
+                        Image(systemName: "eye.fill").foregroundStyle(.white)
+                        Text("\(viewers)").foregroundStyle(.white).font(.footnote)
+                    }
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(Color.black.opacity(0.35))
-            .clipShape(Capsule())
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            // Viewer count capsule
-            HStack(spacing: 8) {
-                Circle().fill(isLive ? .red : .gray).frame(width: 8, height: 8)
-                Label("\(viewers)", systemImage: "eye.fill")
-                    .foregroundStyle(.white.opacity(0.9))
-                    .font(.footnote)
+            // Vertical host tools
+            VStack(spacing: 8) {
+                Button { ending = true } label: {
+                    Text("End")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.red.opacity(0.6))
+                        .clipShape(Capsule())
+                }
+                Button { Task { await publisher.switchCamera() } } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath.camera").foregroundStyle(.white)
+                }.frame(width: 32, height: 32)
+                Button { Task { await publisher.toggleCamera() } } label: {
+                    Image(systemName: publisher.cameraOn ? "video.fill" : "video.slash.fill").foregroundStyle(.white)
+                }.frame(width: 32, height: 32)
+                Button { Task { await publisher.toggleMic() } } label: {
+                    Image(systemName: publisher.micOn ? "mic.fill" : "mic.slash.fill").foregroundStyle(.white)
+                }.frame(width: 32, height: 32)
+                if let url = URL(string: "https://gifters.club/live/\(stream.id)") {
+                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up").foregroundStyle(.white) }.frame(width: 32, height: 32)
+                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(6)
             .background(Color.black.opacity(0.35))
-            .clipShape(Capsule())
-            .contentShape(Rectangle())
-            .onTapGesture { Task { await loadViewerProfiles(); await refreshModerators(); await MainActor.run { showViewerList = true } } }
-
-            // Tap count capsule (heart + taps)
-            HStack(spacing: 6) {
-                Image(systemName: "heart.fill").foregroundStyle(.red)
-                Text("\(totalTaps)").foregroundStyle(.white).font(.footnote)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.black.opacity(0.35))
-            .clipShape(Capsule())
-
-            Button { ending = true } label: {
-                Text("End")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.35))
-                    .clipShape(Capsule())
-            }
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 
     private var bottomBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: 8) {
-            Button { Task { await publisher.toggleMic() } } label: {
-                Image(systemName: publisher.micOn ? "mic.fill" : "mic.slash.fill")
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 44, height: 44)
-            .background(Color.black.opacity(0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-
-            Button { Task { await publisher.toggleCamera() } } label: {
-                Image(systemName: publisher.cameraOn ? "camera.fill" : "camera")
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 44, height: 44)
-            .background(Color.black.opacity(0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-
             // Effects (beauty/AR) placed before composer so it stays visible
             Menu {
                 Toggle(isOn: Binding(get: { publisher.beautyOn }, set: { v in

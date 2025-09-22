@@ -1115,7 +1115,12 @@ final class SupabaseManager: ObservableObject {
         let ch = client.channel("live-taps-\(streamId.prefix(6))")
         _ = ch.onPostgresChange(UpdateAction.self, schema: "public", table: "live_streams", filter: "id=eq.\(streamId)") { action in
             let rec = action.record
-            if let taps = rec["taps"] as? Int { DispatchQueue.main.async { onUpdate(taps) } }
+            if let data = try? JSONSerialization.data(withJSONObject: rec) {
+                struct Row: Decodable { let taps: Int? }
+                if let row = try? JSONDecoder().decode(Row.self, from: data), let t = row.taps {
+                    DispatchQueue.main.async { onUpdate(t) }
+                }
+            }
         }
         do { try await ch.subscribeWithError() } catch { return }
         tapsChannels[streamId] = ch

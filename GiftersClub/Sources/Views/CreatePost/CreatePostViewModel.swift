@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
-import AVFoundation
+@preconcurrency import AVFoundation
 
 enum PostAccessType: String, CaseIterable, Identifiable {
     case free
@@ -190,7 +190,7 @@ final class CreatePostViewModel: ObservableObject {
         session.outputURL = outputURL
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
-        return await withUnsafeContinuation { cont in
+        return await withCheckedContinuation { cont in
             session.exportAsynchronously { [inputURL, outputURL] in
                 defer {
                     try? FileManager.default.removeItem(at: inputURL)
