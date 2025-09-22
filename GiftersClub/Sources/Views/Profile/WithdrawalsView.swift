@@ -44,7 +44,7 @@ struct WithdrawalsView: View {
 
                 // Request form
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Withdraw Credits").font(.headline)
+                    Text("Creator Credits").font(.headline)
                     TextField("Amount (credits)", text: $amountText)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
@@ -93,7 +93,7 @@ struct WithdrawalsView: View {
             }
             .padding()
         }
-        .navigationTitle("Withdraw Credits")
+        .navigationTitle("Creator Credits")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }

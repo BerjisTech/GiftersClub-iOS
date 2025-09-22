@@ -47,7 +47,7 @@ struct AccountView: View {
                         }
                         HStack(spacing: 10) {
                             GradientButton(title: "Buy Tokens") { showTopUp = true }
-                            GradientButton(title: "Withdraw Credits") { showWithdrawals = true }
+                            GradientButton(title: "Creator Credits") { showWithdrawals = true }
                             Button(action: { showCreditsInfo = true }) {
                                 Image(systemName: "questionmark.circle")
                                     .font(.title3)
