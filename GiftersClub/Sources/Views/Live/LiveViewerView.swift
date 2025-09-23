@@ -759,11 +759,14 @@ struct LiveViewerView: View {
                 throw NSError(domain: "LiveKit", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing LiveKit token"]) }
             try await viewer.connect(url: SupabaseConfig.livekitURL, token: tok)
             // Receive LiveKit data messages (e.g., tap events from other clients)
-            viewer.onData = { type in
-                if type == "tap" {
-                    // hearts + near-instant total bump; realtime subscription reconciles with server
+            viewer.onData = { typeOrJson in
+                if typeOrJson == "tap" {
+                    spawnRemoteHearts(); totalTaps += 1
+                } else if let data = typeOrJson.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          (obj["type"] as? String) == "tap" {
                     spawnRemoteHearts()
-                    totalTaps += 1
+                    if let t = obj["t"] as? Int { totalTaps = t } else { totalTaps += 1 }
                 }
             }
             // In case tracks were already present, try to bind first available video

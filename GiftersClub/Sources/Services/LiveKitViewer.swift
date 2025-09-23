@@ -69,8 +69,11 @@ final class LiveKitViewer: NSObject, ObservableObject, RoomDelegate {
 
     // LiveKit RoomDelegate: receive data messages from participants
     func room(_ room: Room, didReceive data: Data, participant: RemoteParticipant?) {
-        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let type = obj["type"] as? String {
+        // Forward full JSON string when possible so callers can extract totals
+        if let s = String(data: data, encoding: .utf8) {
+            onData?(s)
+        } else if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String {
             onData?(type)
         }
     }

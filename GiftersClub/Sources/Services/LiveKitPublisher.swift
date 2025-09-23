@@ -81,8 +81,10 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
 
     // RoomDelegate methods are optional; we rely on direct state after publish/toggles.
     func room(_ room: Room, didReceive data: Data, participant: RemoteParticipant?) {
-        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let type = obj["type"] as? String {
+        if let s = String(data: data, encoding: .utf8) {
+            onData?(s)
+        } else if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String {
             onData?(type)
         }
     }

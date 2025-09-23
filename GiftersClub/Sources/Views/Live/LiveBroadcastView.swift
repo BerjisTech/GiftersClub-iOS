@@ -251,10 +251,19 @@ struct LiveBroadcastView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(hostProfile?.username ?? "").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                         if let f = hostProfile?.followers_count { Text("\(f) followers").font(.caption2).foregroundStyle(.white.opacity(0.9)) }
-                        HStack(spacing: 6) {
-                            Image(systemName: "eye.fill").foregroundStyle(.white)
-                            Text("\(viewers)").foregroundStyle(.white).font(.footnote)
+                HStack(spacing: 6) {
+                    Image(systemName: "eye.fill").foregroundStyle(.white)
+                    Text("\(viewers)").foregroundStyle(.white).font(.footnote)
+                }
+                .onTapGesture {
+                    Task {
+                        if let list = try? await supa.fetchLiveViewers(streamId: stream.id) {
+                            await MainActor.run { viewerProfiles = list; showViewerList = true }
+                        } else {
+                            await MainActor.run { showViewerList = true }
                         }
+                    }
+                }
                     }
                 }
                 .padding(.horizontal, 8)
