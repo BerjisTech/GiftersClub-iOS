@@ -1189,6 +1189,18 @@ final class SupabaseManager: ObservableObject {
         return try await fetchProfilesByUserIds(ids)
     }
 
+    // Joined fetch variant: returns profile objects directly; useful if RLS allows join but not separate table reads
+    func fetchLiveViewerProfiles(streamId: String, limit: Int = 200) async throws -> [DBProfile] {
+        struct Row: Decodable { let profile: DBProfile? }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("live_stream_viewers")
+            .select("profile:profiles(user_id,username,name,image)")
+            .eq("live_stream_id", value: streamId)
+            .limit(limit)
+            .execute()
+        return res.value.compactMap { $0.profile }
+    }
+
     func fetchProfileByUserId(_ userId: String) async throws -> DBProfile? {
         let res: PostgrestResponse<[DBProfile]> = try await client
             .from("profiles")

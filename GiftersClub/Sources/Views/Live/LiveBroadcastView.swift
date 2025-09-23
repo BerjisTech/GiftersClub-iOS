@@ -46,6 +46,7 @@ struct LiveBroadcastView: View {
     @State private var addTeam: Int = 1
     @State private var showViewerList: Bool = false
     @State private var viewerProfiles: [SupabaseManager.DBProfile] = []
+    @State private var viewerListTimer: Timer? = nil
     @State private var moderatorIds: Set<String> = []
     @State private var moderatorProfiles: [SupabaseManager.DBProfile] = []
     @State private var stickToBottom: Bool = true
@@ -368,6 +369,7 @@ struct LiveBroadcastView: View {
         .padding(.bottom, 24)
         .sheet(isPresented: $showManagePanel) { managePanel }
         .sheet(isPresented: $showViewerList) { viewerListSheet }
+        .sheetStyleCompat()
     }
 
     private var commentsBar: some View {
@@ -469,14 +471,38 @@ struct LiveBroadcastView: View {
             }
             .navigationTitle("Viewers")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showViewerList = false } } }
-            .task { await loadViewerProfiles() }
+            .task {
+                await loadViewerProfiles()
+                viewerListTimer?.invalidate()
+                viewerListTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true, block: { _ in
+                    Task { await loadViewerProfiles() }
+                })
+            }
+            .onDisappear { viewerListTimer?.invalidate(); viewerListTimer = nil }
         }
     }
 
     private func loadViewerProfiles() async {
-        if let list = try? await supa.fetchLiveViewers(streamId: stream.id) {
-            await MainActor.run { viewerProfiles = list }
+        // Aggregate viewers across cohost streams when in multi-host/shared room
+        var ids: [String] = [stream.id]
+        if !cohostStreamIds.isEmpty { ids.append(contentsOf: cohostStreamIds) }
+        var all: [SupabaseManager.DBProfile] = []
+        for sid in ids {
+            // Prefer joined fetch (may bypass stricter RLS on direct profiles reads)
+            if let list = try? await supa.fetchLiveViewerProfiles(streamId: sid) {
+                all.append(contentsOf: list)
+            } else if let list = try? await supa.fetchLiveViewers(streamId: sid) {
+                all.append(contentsOf: list)
+            }
         }
+        // De-dup by user_id and sort by username
+        var seen: Set<String> = []
+        var unique: [SupabaseManager.DBProfile] = []
+        for p in all {
+            if !seen.contains(p.user_id) { seen.insert(p.user_id); unique.append(p) }
+        }
+        unique.sort { ($0.username) < ($1.username) }
+        await MainActor.run { viewerProfiles = unique }
     }
 
     private func refreshModerators() async {
