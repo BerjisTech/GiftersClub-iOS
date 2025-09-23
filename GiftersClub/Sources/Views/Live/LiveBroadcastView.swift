@@ -3,6 +3,7 @@ import SwiftUI
 import LiveKit
 #endif
 import AVFoundation
+import UIKit
 
 struct LiveBroadcastView: View {
     let stream: SupabaseManager.DBLiveStream
@@ -97,9 +98,17 @@ struct LiveBroadcastView: View {
                     .allowsHitTesting(false)
             }
         }
-        .onAppear { NotificationCenter.default.post(name: .hideBottomBar, object: nil); Task { await goLiveIfNeeded(); await startHostPolling(); await startRealtimeComments(); await startRealtimeGifts(); await preloadHostProfile(); await subscribeToTaps() }; if startManagePanel { showManagePanel = true } }
+        .onAppear {
+            // Keep screen awake during hosting to avoid display sleep
+            UIApplication.shared.isIdleTimerDisabled = true
+            NotificationCenter.default.post(name: .hideBottomBar, object: nil)
+            Task { await goLiveIfNeeded(); await startHostPolling(); await startRealtimeComments(); await startRealtimeGifts(); await preloadHostProfile(); await subscribeToTaps() }
+            if startManagePanel { showManagePanel = true }
+        }
         .onDisappear {
             NotificationCenter.default.post(name: .showBottomBar, object: nil)
+            // Restore idle timer behavior when leaving live
+            UIApplication.shared.isIdleTimerDisabled = false
             battleTimer?.invalidate(); battleTimer = nil
             battleCountdownTimer?.invalidate(); battleCountdownTimer = nil
             invitesTimer?.invalidate(); invitesTimer = nil

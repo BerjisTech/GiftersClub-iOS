@@ -3,6 +3,7 @@ import SwiftUI
 import LiveKit
 #endif
 import Supabase
+import UIKit
 
 struct LiveViewerView: View {
     let live: SupabaseManager.DBLiveStreamWithStats
@@ -149,6 +150,8 @@ struct LiveViewerView: View {
         })
         .background(Color.black)
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .task {
             // Moderation: block check
             if (try? await supa.isUserBlockedBy(userId: live.host_id)) == true {
