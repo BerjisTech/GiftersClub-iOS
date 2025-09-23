@@ -55,6 +55,8 @@ struct LiveBroadcastView: View {
     @State private var totalTaps: Int = 0
     private struct HeartParticle: Identifiable { let id = UUID(); var position: CGPoint; var opacity: Double; var scale: CGFloat }
     @State private var tapHearts: [HeartParticle] = []
+    @State private var tapBatch: Int = 0
+    @State private var tapFlushTimer: Timer? = nil
 
     var body: some View {
         ZStack {
@@ -100,6 +102,7 @@ struct LiveBroadcastView: View {
             battleTimer?.invalidate(); battleTimer = nil
             battleCountdownTimer?.invalidate(); battleCountdownTimer = nil
             invitesTimer?.invalidate(); invitesTimer = nil
+            tapFlushTimer?.invalidate(); tapFlushTimer = nil
             Task {
                 for id in commentSubscribedIds { await supa.unsubscribeLiveComments(streamId: id) }
                 for id in giftSubscribedIds { await supa.unsubscribeGiftSent(streamId: id) }
@@ -496,12 +499,24 @@ struct LiveBroadcastView: View {
             // Connect to LiveKit and publish camera+mic
             try await publisher.connectAndPublish(url: SupabaseConfig.livekitURL, token: token)
             // Listen for data messages like {"type":"tap"} from viewers
-            publisher.onData = { type in
-                if type == "tap" {
-                    spawnRemoteHearts()
-                    totalTaps += 1
+            publisher.onData = { typeOrJson in
+                if typeOrJson == "tap" {
+                    spawnRemoteHearts(); tapBatch += 1
+                } else if let data = typeOrJson.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          (obj["type"] as? String) == "tap" {
+                    spawnRemoteHearts(); tapBatch += 1
+                    if let t = obj["t"] as? Int { totalTaps = t }
                 }
             }
+            // Start periodic flush: host updates taps total in DB
+            tapFlushTimer?.invalidate()
+            tapFlushTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true, block: { _ in
+                let count = tapBatch
+                if count <= 0 { return }
+                tapBatch = 0
+                Task { await supa.incrementLiveTaps(streamId: stream.id, inc: count) }
+            })
             await MainActor.run { isLive = true }
             // Load battle state (if any) and start tally polling
             var activeBattle: SupabaseManager.DBBattleSession? = nil

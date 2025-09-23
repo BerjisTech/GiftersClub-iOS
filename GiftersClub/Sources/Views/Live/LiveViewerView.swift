@@ -173,7 +173,7 @@ struct LiveViewerView: View {
                         // Preload profile
                         Task { if profilesCache[c.user_id] == nil, let p = try? await supa.fetchProfileByUserId(c.user_id) { await MainActor.run { profilesCache[c.user_id] = p } } }
                         // Trigger remote hearts when someone likes the live (content-only, username comes from profile)
-                        if c.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "liked the live" {
+                        if c.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "liked this live" {
                             spawnRemoteHearts()
                         }
                     }
@@ -433,11 +433,15 @@ struct LiveViewerView: View {
             tapHearts.removeAll { $0.id == h.id }
         }
         localTapCount += 1
-        // Optimistic total taps update for immediate feedback
-        totalTaps += 1
-        Task { await supa.incrementLiveTaps(streamId: live.id, inc: 1) }
-        // Also send a realtime tap signal via LiveKit so cross‑platform hosts see hearts immediately
-        viewer.sendTap()
+        // Increment DB, then fetch authoritative taps and emit LiveKit "tap" including total
+        Task {
+            await supa.incrementLiveTaps(streamId: live.id, inc: 1)
+            if let row = try? await supa.fetchLiveStreamById(live.id), let taps = row.taps {
+                await MainActor.run { totalTaps = taps; viewer.sendTap(total: taps) }
+            } else {
+                await MainActor.run { totalTaps += 1; viewer.sendTap(total: totalTaps) }
+            }
+        }
         if !likeCommentSent {
             likeCommentSent = true
             Task { _ = try? await supa.sendLiveComment(streamId: live.id, content: "liked this live") }
@@ -757,6 +761,7 @@ struct LiveViewerView: View {
             // Receive LiveKit data messages (e.g., tap events from other clients)
             viewer.onData = { type in
                 if type == "tap" {
+                    // hearts + near-instant total bump; realtime subscription reconciles with server
                     spawnRemoteHearts()
                     totalTaps += 1
                 }
