@@ -469,6 +469,7 @@ struct LiveBroadcastView: View {
             }
             .navigationTitle("Viewers")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showViewerList = false } } }
+            .task { await loadViewerProfiles() }
         }
     }
 
