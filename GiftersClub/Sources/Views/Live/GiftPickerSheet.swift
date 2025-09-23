@@ -8,6 +8,8 @@ struct GiftPickerSheet: View {
     @State private var sort: SupabaseManager.GiftsSortKey = .popular
     @State private var error: String? = nil
     @State private var isSending: Bool = false
+    @State private var showTopUp: Bool = false
+    @State private var missingTokens: Int? = nil
 
     var body: some View {
         NavigationStack {
@@ -54,6 +56,9 @@ struct GiftPickerSheet: View {
             .task { await load() }
             .onChange(of: sort, perform: { _ in Task { await load() } })
         }
+        .sheet(isPresented: $showTopUp) {
+            TokenTopUpSheet(initialAmount: missingTokens, onCompleted: { _ in })
+        }
     }
 
     private func load() async {
@@ -64,6 +69,15 @@ struct GiftPickerSheet: View {
     private func send(_ gift: SupabaseManager.DBGift) async {
         guard let tokens = gift.tokens else { return }
         do {
+            // Check balance before attempting to send; trigger IAP if insufficient
+            if let me = supa.user?.id.uuidString, let prof = try? await supa.fetchProfile(username: nil, userId: me) {
+                let balance = prof.token_balance ?? 0
+                if balance < tokens {
+                    let shortfall = max(tokens - balance, 0)
+                    await MainActor.run { self.missingTokens = shortfall; self.showTopUp = true }
+                    return
+                }
+            }
             _ = await MainActor.run { isSending = true; self.error = nil }
             try await supa.sendGift(giftId: gift.id, recipientId: recipientId, tokens: tokens)
             _ = await MainActor.run { isSending = false; dismiss() }
