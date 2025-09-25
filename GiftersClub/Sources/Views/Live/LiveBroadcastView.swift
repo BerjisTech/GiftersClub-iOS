@@ -508,13 +508,20 @@ struct LiveBroadcastView: View {
             // Configure audio session for low-latency voice/video to avoid AVAudioEngine errors (-3010)
             let session = AVAudioSession.sharedInstance()
             do {
+                // Make sure no stale audio session is active before we grab the mic again
+                try? session.setActive(false, options: [.notifyOthersOnDeactivation])
                 try session.setCategory(.playAndRecord, mode: .videoChat, options: [.defaultToSpeaker, .allowBluetooth])
                 try session.setPreferredSampleRate(48_000)
                 try session.setPreferredIOBufferDuration(0.01)
                 try session.setActive(true, options: .notifyOthersOnDeactivation)
             } catch {
                 let nsError = error as NSError
-                let hint = nsError.code == 3010 ? "Another app may be using the microphone. Close other audio apps and try again." : nil
+                var hint: String? = nil
+                if nsError.code == 3010 {
+                    hint = "Another app may be using the microphone. Close other audio apps and try again."
+                } else if nsError.localizedDescription.localizedCaseInsensitiveContains("Session activation failed") {
+                    hint = "Force-quit and relaunch the app, then try again with headphones disconnected."
+                }
                 let message = [nsError.localizedDescription, hint].compactMap { $0 }.joined(separator: "\n")
                 await MainActor.run { errorText = message }
                 return
