@@ -328,14 +328,14 @@ private struct SettingsDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 LabeledContent("Support Email") {
                     Button(action: { openMail(subject: nil) }) {
-                        Text("support@giftersclub.com")
+                        Text("accounts@gifters.club")
                             .foregroundStyle(.blue)
                             .underline()
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Email support@giftersclub.com")
+                    .accessibilityLabel("Email accounts@gifters.club")
                 }
-                if let url = URL(string: "https://www.giftersclub.com/support") {
+                if let url = URL(string: "https://www.gifters.club/support") {
                     LabeledContent("Support Site") {
                         Link("Visit support portal", destination: url)
                     }
@@ -363,7 +363,7 @@ private struct SettingsDetailView: View {
     private func openMail(subject: String?) {
         var components = URLComponents()
         components.scheme = "mailto"
-        components.path = "support@giftersclub.com"
+        components.path = "accounts@gifters.club"
         if let subject, !subject.isEmpty {
             components.queryItems = [URLQueryItem(name: "subject", value: subject)]
         }

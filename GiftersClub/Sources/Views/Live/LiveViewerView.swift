@@ -66,6 +66,7 @@ struct LiveViewerView: View {
     @State private var hasAccessLive: Bool = false
     @State private var liveAccessType: String? = nil
     @State private var livePrice: Int? = nil
+    @State private var joinMessageSent: Bool = false
 
     var body: some View {
         ZStack {
@@ -176,6 +177,11 @@ struct LiveViewerView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onChange(of: hasAccessLive) { allowed in
+            if allowed {
+                Task { await broadcastJoinIfNeeded() }
+            }
+        }
         .task {
             // Moderation: block check
             if (try? await supa.isUserBlockedBy(userId: live.host_id)) == true {
@@ -206,6 +212,7 @@ struct LiveViewerView: View {
             amModerator = await supa.isModeratorOfHost(hostId: live.host_id)
             if hasAccessLive { await join() }
             await supa.recordViewerJoin(streamId: live.id)
+            await broadcastJoinIfNeeded()
             await loadComments(); await startStatusPolling()
             // Cohost comments: switch to realtime across stream ids (fallback timer disabled by default)
             if let ids = try? await supa.fetchCohostStreamIds(streamId: live.id) {
@@ -846,7 +853,7 @@ struct LiveViewerView: View {
         }
         let rulesId = "sys-rules"
         if !comments.contains(where: { $0.id == rulesId }) {
-            let msg = "Be respectful. Avoid sexual content. Follow the rules."
+            let msg = "Please be respectful to everyone, follow the community rules, avoid harassment or bullying, and do not share sexual or explicit content."
             let c = SupabaseManager.DBLiveStreamComment(id: rulesId, live_stream_id: live.id, user_id: live.host_id, content: msg, created_at: nil)
             comments.insert(c, at: min(1, comments.count))
         }
@@ -870,6 +877,39 @@ struct LiveViewerView: View {
             await join()
         } catch {
             await MainActor.run { errorText = (error as NSError).localizedDescription }
+        }
+    }
+
+    private func broadcastJoinIfNeeded() async {
+        guard hasAccessLive, !joinMessageSent else { return }
+        guard let me = supa.user?.id.uuidString else { return }
+        var profile = profilesCache[me]
+        if profile == nil {
+            profile = try? await supa.fetchProfileByUserId(me)
+            if let fetched = profile {
+                await MainActor.run { profilesCache[me] = fetched }
+            }
+        }
+        let trimmedUsername = profile?.username.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let trimmedName = profile?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let handle: String
+        if !trimmedUsername.isEmpty {
+            handle = trimmedUsername
+        } else if !trimmedName.isEmpty {
+            handle = trimmedName
+        } else {
+            handle = String(me.prefix(6))
+        }
+        let message = "\(handle) has joined"
+        if let comment = try? await supa.sendLiveComment(streamId: live.id, content: message) {
+            await MainActor.run {
+                if !comments.contains(where: { $0.id == comment.id }) {
+                    comments.append(comment)
+                }
+                joinMessageSent = true
+            }
+        } else {
+            await MainActor.run { joinMessageSent = true }
         }
     }
 

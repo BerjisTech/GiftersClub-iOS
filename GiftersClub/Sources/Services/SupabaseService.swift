@@ -1233,7 +1233,7 @@ final class SupabaseManager: ObservableObject {
         struct Row: Decodable { let profile: DBProfile? }
         let res: PostgrestResponse<[Row]> = try await client
             .from("live_stream_viewers")
-            .select("profile:profiles(user_id,username,name,image)")
+            .select("profile:profiles(user_id,username,name,image,gifter_level,gifter_level_name)")
             .eq("live_stream_id", value: streamId)
             .limit(limit)
             .execute()
@@ -1905,7 +1905,7 @@ final class SupabaseManager: ObservableObject {
         guard !ids.isEmpty else { return [] }
         let res: PostgrestResponse<[DBProfile]> = try await client
             .from("profiles")
-            .select("user_id,username,name,image,email")
+            .select("user_id,username,name,image,email,gifter_level,gifter_level_name")
             .in("user_id", values: ids)
             .execute()
         return res.value

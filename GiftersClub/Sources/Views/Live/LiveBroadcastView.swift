@@ -47,7 +47,6 @@ struct LiveBroadcastView: View {
     @State private var addTeam: Int = 1
     @State private var showViewerList: Bool = false
     @State private var viewerProfiles: [SupabaseManager.DBProfile] = []
-    @State private var viewerListTimer: Timer? = nil
     @State private var moderatorIds: Set<String> = []
     @State private var moderatorProfiles: [SupabaseManager.DBProfile] = []
     @State private var stickToBottom: Bool = true
@@ -113,6 +112,7 @@ struct LiveBroadcastView: View {
             battleCountdownTimer?.invalidate(); battleCountdownTimer = nil
             invitesTimer?.invalidate(); invitesTimer = nil
             tapFlushTimer?.invalidate(); tapFlushTimer = nil
+            viewerProfiles.removeAll()
             Task {
                 for id in commentSubscribedIds { await supa.unsubscribeLiveComments(streamId: id) }
                 for id in giftSubscribedIds { await supa.unsubscribeGiftSent(streamId: id) }
@@ -452,66 +452,74 @@ struct LiveBroadcastView: View {
 
     private var viewerListSheet: some View {
         NavigationStack {
-            List(viewerProfiles, id: \.user_id) { p in
-                HStack(spacing: 12) {
-                    if let img = p.image, let url = URL(string: img) {
-                        AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
-                            .frame(width: 36, height: 36)
-                            .clipShape(Circle())
-                    } else { Circle().fill(Color.white.opacity(0.2)).frame(width: 36, height: 36) }
-                    VStack(alignment: .leading) {
-                        Text("@\(p.username)").font(.subheadline.weight(.semibold))
-                        if let name = p.name, !name.isEmpty { Text(name).font(.caption).foregroundStyle(.secondary) }
-                        if moderatorIds.contains(p.user_id) { Text("Moderator").font(.caption2.weight(.bold)).foregroundStyle(.green) }
-                    }
+            VStack(spacing: 0) {
+                if viewerProfiles.isEmpty {
                     Spacer()
-                    Menu {
-                        if moderatorIds.contains(p.user_id) {
-                            Button("Remove moderator") { Task { try? await supa.removeLiveModerator(hostId: stream.host_id, moderatorUserId: p.user_id); await refreshModerators(); banners.show(Banner(title: "Moderator removed", style: .success)) } }
-                        } else {
-                            Button("Make moderator") { Task { try? await supa.addLiveModerator(hostId: stream.host_id, moderatorUserId: p.user_id); await refreshModerators(); banners.show(Banner(title: "Added moderator", style: .success)) } }
+                    Image(systemName: "person.2")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("No viewers yet")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                } else {
+                    List(viewerProfiles, id: \.user_id) { p in
+                        HStack(spacing: 12) {
+                            if let img = p.image, let url = URL(string: img) {
+                                AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
+                                    .frame(width: 36, height: 36)
+                                    .clipShape(Circle())
+                            } else { Circle().fill(Color.white.opacity(0.2)).frame(width: 36, height: 36) }
+                            VStack(alignment: .leading) {
+                                Text("@\(p.username)").font(.subheadline.weight(.semibold))
+                                if let name = p.name, !name.isEmpty { Text(name).font(.caption).foregroundStyle(.secondary) }
+                                if let lvl = p.gifter_level, lvl > 0 {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "sparkles").font(.caption2).foregroundStyle(.orange)
+                                        Text("Lv \(lvl)").font(.caption2.weight(.bold)).foregroundStyle(.orange)
+                                        if let title = p.gifter_level_name, !title.isEmpty {
+                                            Text(title).font(.caption2).foregroundStyle(.orange.opacity(0.85))
+                                        }
+                                    }
+                                }
+                                if moderatorIds.contains(p.user_id) { Text("Moderator").font(.caption2.weight(.bold)).foregroundStyle(.green) }
+                            }
+                            Spacer()
+                            Menu {
+                                if moderatorIds.contains(p.user_id) {
+                                    Button("Remove moderator") { Task { try? await supa.removeLiveModerator(hostId: stream.host_id, moderatorUserId: p.user_id); await refreshModerators(); banners.show(Banner(title: "Moderator removed", style: .success)) } }
+                                } else {
+                                    Button("Make moderator") { Task { try? await supa.addLiveModerator(hostId: stream.host_id, moderatorUserId: p.user_id); await refreshModerators(); banners.show(Banner(title: "Added moderator", style: .success)) } }
+                                }
+                                Button("Mute user") { Task { try? await supa.muteUser(hostId: stream.host_id, targetUserId: p.user_id); banners.show(Banner(title: "User muted", style: .success)) } }
+                                Button("Block user", role: .destructive) { Task { try? await supa.blockUser(targetUserId: p.user_id); banners.show(Banner(title: "User blocked", style: .success)) } }
+                            } label: {
+                                Image(systemName: "ellipsis.circle").font(.title3)
+                            }
                         }
-                        Button("Mute user") { Task { try? await supa.muteUser(hostId: stream.host_id, targetUserId: p.user_id); banners.show(Banner(title: "User muted", style: .success)) } }
-                        Button("Block user", role: .destructive) { Task { try? await supa.blockUser(targetUserId: p.user_id) ; banners.show(Banner(title: "User blocked", style: .success)) } }
-                    } label: {
-                        Image(systemName: "ellipsis.circle").font(.title3)
                     }
                 }
             }
             .navigationTitle("Viewers")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showViewerList = false } } }
-            .task {
-                await loadViewerProfiles()
-                viewerListTimer?.invalidate()
-                viewerListTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true, block: { _ in
-                    Task { await loadViewerProfiles() }
-                })
-            }
-            .onDisappear { viewerListTimer?.invalidate(); viewerListTimer = nil }
+            .task { await loadViewerProfiles() }
         }
     }
 
     private func loadViewerProfiles() async {
-        // Aggregate viewers across cohost streams when in multi-host/shared room
-        var ids: [String] = [stream.id]
-        if !cohostStreamIds.isEmpty { ids.append(contentsOf: cohostStreamIds) }
-        var all: [SupabaseManager.DBProfile] = []
-        for sid in ids {
-            // Prefer joined fetch (may bypass stricter RLS on direct profiles reads)
-            if let list = try? await supa.fetchLiveViewerProfiles(streamId: sid) {
-                all.append(contentsOf: list)
-            } else if let list = try? await supa.fetchLiveViewers(streamId: sid) {
-                all.append(contentsOf: list)
+        do {
+            let profiles = try await supa.fetchLiveViewerProfiles(streamId: stream.id)
+            await MainActor.run {
+                viewerProfiles = profiles
+                for profile in profiles { profilesCache[profile.user_id] = profile }
+            }
+        } catch {
+            let fallback = (try? await supa.fetchLiveViewers(streamId: stream.id)) ?? []
+            await MainActor.run {
+                viewerProfiles = fallback
+                for profile in fallback { profilesCache[profile.user_id] = profile }
             }
         }
-        // De-dup by user_id and sort by username
-        var seen: Set<String> = []
-        var unique: [SupabaseManager.DBProfile] = []
-        for p in all {
-            if !seen.contains(p.user_id) { seen.insert(p.user_id); unique.append(p) }
-        }
-        unique.sort { ($0.username) < ($1.username) }
-        await MainActor.run { viewerProfiles = unique }
     }
 
     private func refreshModerators() async {

@@ -4,10 +4,10 @@ import AVFAudio
 
 struct GoLiveSetupView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var title: String = ""
+    @State private var title: String = "Welcome to my live"
     @State private var description: String = ""
     @State private var categories: [SupabaseManager.DBSystemCategory] = []
-    @State private var categoryQuery: String = ""
+    @State private var categoryQuery: String = "Just Chatting"
     @State private var selectedCategory: SupabaseManager.DBSystemCategory? = nil
     @State private var tagsText: String = ""
     @State private var btnState: GradientButtonState = .normal
@@ -129,7 +129,22 @@ struct GoLiveSetupView: View {
             }
         }
         .task {
-            if categories.isEmpty { if let rows = try? await supa.fetchSystemCategories() { categories = rows } }
+            if categories.isEmpty {
+                if let rows = try? await supa.fetchSystemCategories() {
+                    categories = rows
+                    if selectedCategory == nil {
+                        if let defaultCategory = rows.first(where: { $0.name.lowercased() == "just chatting" }) {
+                            selectedCategory = defaultCategory
+                            categoryQuery = defaultCategory.name
+                        }
+                    }
+                }
+            } else if selectedCategory == nil {
+                if let defaultCategory = categories.first(where: { $0.name.lowercased() == "just chatting" }) {
+                    selectedCategory = defaultCategory
+                    categoryQuery = defaultCategory.name
+                }
+            }
             if accessType == .subscription, let me = supa.user?.id.uuidString, let plans = try? await supa.fetchSubscriptionPlans(creatorId: me) {
                 availablePlans = plans.sorted { $0.tokens < $1.tokens }
                 selectedPlanId = availablePlans.first?.id
