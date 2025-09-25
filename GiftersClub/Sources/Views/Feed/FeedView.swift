@@ -336,40 +336,45 @@ private struct ModerationDrawer: View {
     var onSave: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Content preferences").font(.subheadline).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                pill(title: "Not interested", isOn: $actionNotInterested)
-                pill(title: "Block @\(username)", isOn: $actionBlock)
-                pill(title: "Report @\(username)", isOn: $actionReport)
-            }
-            if actionNotInterested {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Refine \"Not interested\":").font(.caption).foregroundStyle(.secondary)
-                    HStack(spacing: 8) {
-                        pill(title: "This creator", isOn: $notInterestedCreator)
-                        pill(title: hasVideo ? "This type of content" : "This type of content", isOn: $notInterestedType)
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Content preferences").font(.subheadline).foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
+                    pill(title: "Not interested", isOn: $actionNotInterested)
+                    pill(title: "Block creator", isOn: $actionBlock)
+                    pill(title: "Report creator", isOn: $actionReport)
                 }
-                .transition(.opacity)
+                if actionNotInterested {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Refine \"Not interested\":").font(.caption).foregroundStyle(.secondary)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
+                            pill(title: "This creator", isOn: $notInterestedCreator)
+                            pill(title: hasVideo ? "This type of content" : "This type of content", isOn: $notInterestedType)
+                        }
+                    }
+                    .transition(.opacity)
+                }
+                HStack { Spacer();
+                    Button("Cancel", action: onCancel).buttonStyle(.bordered)
+                    Button("Save") { onSave() }
+                        .buttonStyle(.borderedProminent)
+                }
             }
-            HStack { Spacer();
-                Button("Cancel", action: onCancel).buttonStyle(.bordered)
-                Button("Save") { onSave() }
-                    .buttonStyle(.borderedProminent)
-            }
+            .padding(16)
         }
-        .padding(16)
     }
 
     private func pill(title: String, isOn: Binding<Bool>) -> some View {
         Button(action: { isOn.wrappedValue.toggle() }) {
-            Text(title).font(.footnote)
+            Text(title)
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(isOn.wrappedValue ? .red : .primary)
-                .padding(.horizontal, 10).padding(.vertical, 6)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, minHeight: 40)
                 .background(isOn.wrappedValue ? Color.red.opacity(0.1) : Color.clear)
-                .overlay(RoundedRectangle(cornerRadius: 18).stroke(isOn.wrappedValue ? Color.red : Color.secondary.opacity(0.4), lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(isOn.wrappedValue ? Color.red : Color.secondary.opacity(0.4), lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
         }.buttonStyle(.plain)
     }
 }
@@ -569,7 +574,7 @@ struct PostPageView: View {
                 onCancel: { showModeration = false },
                 onSave: { Task { await applyModerationAndRemove() } }
             )
-            .presentationDetents([.height(260)])
+            .presentationDetents([.height(320)])
             .presentationDragIndicator(.visible)
         }
         .onChange(of: isActive, perform: { active in
