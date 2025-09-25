@@ -39,6 +39,7 @@ struct AuthView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(isLoadingGoogle || !acceptedTerms)
+            .opacity((!isLoadingGoogle && acceptedTerms) ? 1.0 : 0.5)
             .padding(.horizontal, 24)
             // Sign in with Apple (native)
             SignInWithAppleButton(.signIn) { request in
@@ -69,6 +70,7 @@ struct AuthView: View {
             .frame(height: 45)
             .padding(.horizontal, 24)
             .disabled(!acceptedTerms)
+            .opacity(acceptedTerms ? 1.0 : 0.5)
             .alert("Sign in error", isPresented: Binding(get: { errorText != nil }, set: { _ in errorText = nil })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(errorText ?? "") }
