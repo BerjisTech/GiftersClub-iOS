@@ -1,7 +1,14 @@
 import SwiftUI
 import PhotosUI
 
-private enum SettingsTab: String, CaseIterable { case profile = "Profile", security = "Security", moderation = "Moderation", interaction = "Interaction", subscriptions = "Subscriptions" }
+private enum SettingsTab: String, CaseIterable {
+    case profile = "Profile"
+    case security = "Security"
+    case moderation = "Moderation"
+    case interaction = "Interaction"
+    case subscriptions = "Subscriptions"
+    case support = "Support"
+}
 
 struct SettingsView: View {
     @StateObject private var banners = BannerQueue()
@@ -15,6 +22,7 @@ struct SettingsView: View {
                     NavigationLink(destination: SettingsDetailView(tab: .moderation)) { Label("Moderation", systemImage: "hand.raised") }
                     NavigationLink(destination: SettingsDetailView(tab: .interaction)) { Label("Interaction", systemImage: "bubble.left.and.bubble.right") }
                     NavigationLink(destination: SettingsDetailView(tab: .subscriptions)) { Label("Subscriptions", systemImage: "star.circle") }
+                    NavigationLink(destination: SettingsDetailView(tab: .support)) { Label("Support", systemImage: "questionmark.circle") }
                 }
             }
             .listStyle(.insetGrouped)
@@ -30,6 +38,7 @@ private struct SettingsDetailView: View {
     let tab: SettingsTab
     @ObservedObject private var supabase = SupabaseManager.shared
     @StateObject private var banners = BannerQueue()
+    @Environment(\.openURL) private var openURL
 
     // Profile state
     @State private var username: String = ""
@@ -73,6 +82,7 @@ private struct SettingsDetailView: View {
                 case .moderation: moderationContent
                 case .interaction: interactionContent
                 case .subscriptions: subscriptionsContent
+                case .support: supportContent
                 }
             }
             .padding()
@@ -307,6 +317,58 @@ private struct SettingsDetailView: View {
             break
         case .subscriptions:
             await loadPlans()
+        case .support:
+            break
+        }
+    }
+
+    private var supportContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Help & Support").font(.headline)
+            VStack(alignment: .leading, spacing: 12) {
+                LabeledContent("Support Email") {
+                    Button(action: { openMail(subject: nil) }) {
+                        Text("support@giftersclub.com")
+                            .foregroundStyle(.blue)
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Email support@giftersclub.com")
+                }
+                if let url = URL(string: "https://www.giftersclub.com/support") {
+                    LabeledContent("Support Site") {
+                        Link("Visit support portal", destination: url)
+                    }
+                }
+            }
+            .padding()
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Button(action: { openMail(subject: "Support Request") }) {
+                    Label("Contact Support", systemImage: "envelope")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button(action: { openMail(subject: "Report Abuse") }) {
+                    Label("Report Abuse", systemImage: "exclamationmark.bubble")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func openMail(subject: String?) {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = "support@giftersclub.com"
+        if let subject, !subject.isEmpty {
+            components.queryItems = [URLQueryItem(name: "subject", value: subject)]
+        }
+        if let url = components.url {
+            openURL(url)
         }
     }
 

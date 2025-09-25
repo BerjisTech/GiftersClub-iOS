@@ -169,7 +169,7 @@ private struct SearchBarHeightKey: PreferenceKey {
                 case .users:
                     ExploreUsersList(users: r.users) { u in selectedUser = u }
                 case .live:
-                    ExploreLiveGrid()
+                    ExploreLiveGrid(query: query)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -265,6 +265,7 @@ private struct ExploreLiveRow: View {
 }
 
 private struct ExploreLiveGrid: View {
+    let query: String
     @State private var lives: [SupabaseManager.DBLiveStreamWithStats] = []
     @State private var isLoading = false
     private let supabase = SupabaseManager.shared
@@ -286,12 +287,16 @@ private struct ExploreLiveGrid: View {
                 }
             }.padding(.horizontal)
         }
-        .task { await load() }
-        .refreshable { await load() }
+        .task { await load(for: query) }
+        .refreshable { await load(for: query) }
+        .onChange(of: query) { newValue in
+            Task { await load(for: newValue) }
+        }
     }
-    private func load() async {
+    private func load(for query: String) async {
         await MainActor.run { isLoading = true }
-        let r = try? await supabase.fetchFeedLiveStreams(limit: 20, query: nil)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let r = try? await supabase.fetchFeedLiveStreams(limit: 20, query: trimmed.isEmpty ? nil : trimmed)
         await MainActor.run { lives = r ?? []; isLoading = false }
     }
 }
@@ -560,13 +565,16 @@ private struct ExploreUnifiedFeed: View {
             }
             .padding(.top, 8)
         }
-        .task { await loadLives() }
+        .task { await loadLives(for: query) }
         .task {
             // Prefetch access and subscriptions for visible items to avoid N+1 checks
             let postIds = posts.map { $0.id }
             var creatorIds = Set(posts.map { $0.user_id })
             for u in users { creatorIds.insert(u.user_id) }
             await supabase.prefetchAccess(posts: postIds, creators: Array(creatorIds))
+        }
+        .onChange(of: query) { _ in
+            Task { await loadLives(for: query) }
         }
     }
 
@@ -601,9 +609,10 @@ private struct ExploreUnifiedFeed: View {
         return out
     }
 
-    private func loadLives() async {
+    private func loadLives(for query: String) async {
         let limit = max(1, posts.count / 3)
-        let r = try? await supabase.fetchFeedLiveStreams(limit: limit, query: query.isEmpty ? nil : query)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let r = try? await supabase.fetchFeedLiveStreams(limit: limit, query: trimmed.isEmpty ? nil : trimmed)
         await MainActor.run { lives = r ?? [] }
     }
 }

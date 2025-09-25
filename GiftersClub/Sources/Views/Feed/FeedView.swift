@@ -409,15 +409,20 @@ struct LiveCardView: View {
             }
             // Preview paywall overlay when locked
             if !hasAccessPreview {
-                Rectangle().fill(Color.black.opacity(0.55))
-                VStack(spacing: 8) {
+                Rectangle().fill(Color.black.opacity(0.82))
+                VStack(spacing: 10) {
                     Image(systemName: "lock.fill").foregroundStyle(.white)
                     Text(accessType == "subscription" ? "Subscribe to watch" : "Unlock to watch")
-                        .foregroundStyle(.white).font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .font(.footnote.weight(.semibold))
+                    if accessType == "paid", let price {
+                        Text("Unlock for \(price) tokens")
+                            .foregroundStyle(.white.opacity(0.85))
+                            .font(.caption)
+                    }
                 }
-                .padding(10)
-                .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
-                .padding(.bottom, 60)
+                .padding(12)
+                .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
@@ -457,18 +462,16 @@ struct LiveCardView: View {
                         else if (supabase.user?.id.uuidString == live.host_id) { allowed = true }
                         else if t == "subscription" { allowed = (try? await supabase.hasSubscription(to: live.host_id)) ?? false }
                         else if t == "paid" { allowed = (try? await supabase.hasLiveAccess(streamId: live.id)) ?? false }
-                    } else {
-                        allowed = false
                     }
                     await MainActor.run { hasAccessPreview = allowed }
+                    if allowed {
+                        var token: String? = nil
+                        if let session = try? await supabase.fetchLiveSession(live.id), let t = session.token, !t.isEmpty { token = t }
+                        else { token = try? await supabase.fetchLiveViewerToken(streamId: live.id) }
+                        if let tok = token, !tok.isEmpty { try? await previewViewer.connect(url: SupabaseConfig.livekitURL, token: tok) }
+                    }
                 } else {
                     await MainActor.run { hasAccessPreview = false }
-                }
-                if hasAccessPreview {
-                    var token: String? = nil
-                    if let session = try? await supabase.fetchLiveSession(live.id), let t = session.token, !t.isEmpty { token = t }
-                    else { token = try? await supabase.fetchLiveViewerToken(streamId: live.id) }
-                    if let tok = token, !tok.isEmpty { try? await previewViewer.connect(url: SupabaseConfig.livekitURL, token: tok) }
                 }
             }
         }

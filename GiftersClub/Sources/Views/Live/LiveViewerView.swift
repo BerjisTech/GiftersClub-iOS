@@ -750,22 +750,24 @@ struct LiveViewerView: View {
                     Text("Send")
                 }
                 .disabled(!hasAccessLive || newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || mutedByHost)
-                Button(action: { showGiftsSheet = true }) {
-                    Image(systemName: "gift.fill")
-                        .foregroundStyle(.white)
-                        .frame(minWidth: 44, minHeight: 36)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.bordered)
-                if canRequestGuest && !hasRequestedGuest && !battleActive {
-                    Button(action: { Task { await requestToJoin() } }) {
-                        Image(systemName: "person.2.fill")
+                if hasAccessLive {
+                    Button(action: { showGiftsSheet = true }) {
+                        Image(systemName: "gift.fill")
                             .foregroundStyle(.white)
                             .frame(minWidth: 44, minHeight: 36)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.bordered)
-                    .accessibilityLabel("Request to join")
+                    if canRequestGuest && !hasRequestedGuest && !battleActive {
+                        Button(action: { Task { await requestToJoin() } }) {
+                            Image(systemName: "person.2.fill")
+                                .foregroundStyle(.white)
+                                .frame(minWidth: 44, minHeight: 36)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Request to join")
+                    }
                 }
             }
             .contentShape(Rectangle())
@@ -879,6 +881,7 @@ struct LiveViewerView: View {
     }
 
     private func sendComment() async {
+        guard hasAccessLive else { return }
         let text = newComment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         // Client-side moderation: drop if muted or contains filtered keywords

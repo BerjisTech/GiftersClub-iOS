@@ -763,6 +763,9 @@ final class SupabaseManager: ObservableObject {
         let tokens_received: Int?
         let thumbnail_url: String?
         let stream_score: Double?
+        let access_type: String?
+        let price: Int?
+        let required_plan_id: String?
     }
 
     func fetchFeedLiveStreams(limit: Int = 10, query: String? = nil) async throws -> [DBLiveStreamWithStats] {

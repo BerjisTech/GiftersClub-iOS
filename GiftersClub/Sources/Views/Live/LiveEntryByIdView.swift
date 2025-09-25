@@ -66,7 +66,8 @@ private struct LiveViewerRouteWrapper: View {
                     id: s.id, host_id: s.host_id, title: s.title, description: s.description,
                     status: s.status, started_at: s.started_at, ended_at: s.ended_at,
                     viewer_count: s.viewer_count, comment_count: nil, gift_count: nil,
-                    tokens_received: nil, thumbnail_url: nil, stream_score: nil
+                    tokens_received: nil, thumbnail_url: nil, stream_score: nil,
+                    access_type: s.access_type, price: s.price, required_plan_id: s.required_plan_id
                 )
                 await MainActor.run { row = v }
             } else {
