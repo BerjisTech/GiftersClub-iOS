@@ -58,6 +58,7 @@ struct LiveBroadcastView: View {
     @State private var tapHearts: [HeartParticle] = []
     @State private var tapBatch: Int = 0
     @State private var tapFlushTimer: Timer? = nil
+    @FocusState private var commentFieldFocused: Bool
 
     var body: some View {
         ZStack {
@@ -232,6 +233,8 @@ struct LiveBroadcastView: View {
                 .ignoresSafeArea()
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { commentFieldFocused = false }
     }
 
     private func teamOverlay(for userId: String?) -> AnyView {
@@ -359,6 +362,7 @@ struct LiveBroadcastView: View {
                     .lineLimit(1...4)
                     .textFieldStyle(.roundedBorder)
                     .frame(minWidth: 120)
+                    .focused($commentFieldFocused)
                 Button("Send") { Task { await sendComment() } }
                     .buttonStyle(.borderedProminent)
                     .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -920,7 +924,12 @@ struct LiveBroadcastView: View {
     private func sendComment() async {
         let text = newComment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if let _ = try? await supa.sendLiveComment(streamId: stream.id, content: text) { newComment = "" }
+        if let _ = try? await supa.sendLiveComment(streamId: stream.id, content: text) {
+            await MainActor.run {
+                newComment = ""
+                commentFieldFocused = false
+            }
+        }
     }
 
     private func username(for userId: String) -> String {
@@ -940,7 +949,8 @@ struct LiveBroadcastView: View {
     private func commentRow(_ comment: SupabaseManager.DBLiveStreamComment) -> some View {
         let alias = username(for: comment.user_id)
         let profile = profilesCache[comment.user_id]
-        let bodyText = inlineCommentBody(for: comment.content, alias: alias)
+        let systemStyle = isSystemComment(comment)
+        let bodyText = systemStyle ? inlineCommentBody(for: comment.content, alias: alias) : comment.content
         HStack(alignment: .top, spacing: 8) {
             if let profile, let img = profile.image, let url = URL(string: img) {
                 AsyncImage(url: url) { image in
@@ -955,60 +965,95 @@ struct LiveBroadcastView: View {
                     .fill(Color.white.opacity(0.2))
                     .frame(width: 20, height: 20)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(alias)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(userColor(comment.user_id))
-                    .lineLimit(1)
-                if let level = profile?.gifter_level, level > 0 {
-                    Text("Lv \(level)")
-                        .font(.caption2.weight(.bold))
+            if systemStyle {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(alias)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(userColor(comment.user_id))
+                        .lineLimit(1)
+                    if let level = profile?.gifter_level, level > 0 {
+                        Text("Lv \(level)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.25))
+                            .clipShape(Capsule())
+                            .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] }
+                    }
+                    Text(bodyText)
+                        .font(.footnote)
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.25))
-                        .clipShape(Capsule())
-                        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] }
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(bodyText)
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(alias)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(userColor(comment.user_id))
+                        if let level = profile?.gifter_level, level > 0 {
+                            Text("Lv \(level)")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.white.opacity(0.25))
+                                .clipShape(Capsule())
+                        }
+                    }
+                    Text(bodyText)
+                        .font(.footnote)
+                        .foregroundStyle(.white)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .contextMenu {
-            Button("Mute user") {
-                Task {
-                    try? await supa.muteUser(hostId: stream.host_id, targetUserId: comment.user_id)
-                    banners.show(Banner(title: "User muted", style: .success))
-                }
-            }
-            if moderatorIds.contains(comment.user_id) {
-                Button("Remove moderator") {
+            if !systemStyle {
+                Button("Mute user") {
                     Task {
-                        try? await supa.removeLiveModerator(hostId: stream.host_id, moderatorUserId: comment.user_id)
-                        await refreshModerators()
-                        banners.show(Banner(title: "Moderator removed", style: .success))
+                        try? await supa.muteUser(hostId: stream.host_id, targetUserId: comment.user_id)
+                        banners.show(Banner(title: "User muted", style: .success))
                     }
                 }
-            } else {
-                Button("Make moderator") {
-                    Task {
-                        try? await supa.addLiveModerator(hostId: stream.host_id, moderatorUserId: comment.user_id)
-                        await refreshModerators()
-                        banners.show(Banner(title: "Added moderator", style: .success))
+                if moderatorIds.contains(comment.user_id) {
+                    Button("Remove moderator") {
+                        Task {
+                            try? await supa.removeLiveModerator(hostId: stream.host_id, moderatorUserId: comment.user_id)
+                            await refreshModerators()
+                            banners.show(Banner(title: "Moderator removed", style: .success))
+                        }
+                    }
+                } else {
+                    Button("Make moderator") {
+                        Task {
+                            try? await supa.addLiveModerator(hostId: stream.host_id, moderatorUserId: comment.user_id)
+                            await refreshModerators()
+                            banners.show(Banner(title: "Added moderator", style: .success))
+                        }
                     }
                 }
-            }
-            Button("Block user", role: .destructive) {
-                Task {
-                    try? await supa.blockUser(targetUserId: comment.user_id)
-                    banners.show(Banner(title: "User blocked", style: .success))
+                Button("Block user", role: .destructive) {
+                    Task {
+                        try? await supa.blockUser(targetUserId: comment.user_id)
+                        banners.show(Banner(title: "User blocked", style: .success))
+                    }
                 }
             }
         }
         .id(comment.id)
+    }
+
+    private func isSystemComment(_ comment: SupabaseManager.DBLiveStreamComment) -> Bool {
+        let lower = comment.content.lowercased()
+        if comment.id.hasPrefix("sys-") { return true }
+        if lower.hasSuffix("has joined") { return true }
+        if lower.contains("liked this live") { return true }
+        if lower.contains(" sent a ") { return true }
+        if lower.hasPrefix("🔴") { return true }
+        if lower.hasPrefix("please be respectful") { return true }
+        return false
     }
 
     // Drop the username prefix when the stored comment already includes it so the inline row doesn't repeat the handle.

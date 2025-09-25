@@ -54,11 +54,11 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
 
     func switchCamera() async {
         do {
-            // Fallback approach: disable and re-enable camera; many SDKs will flip default device
-            try await room.localParticipant.setCamera(enabled: false)
-            try await room.localParticipant.setCamera(enabled: true)
-            self.isFront.toggle()
-            self.localVideoTrack = self.room.localParticipant.videoTracks.first?.track as? LiveKit.VideoTrack
+            let targetFront = !isFront
+            let options = CameraCaptureOptions(position: targetFront ? .front : .back)
+            let publication = try await room.localParticipant.setCamera(enabled: true, captureOptions: options)
+            self.isFront = targetFront
+            self.localVideoTrack = publication?.track as? LiveKit.VideoTrack ?? self.room.localParticipant.videoTracks.first?.track as? LiveKit.VideoTrack
         } catch { }
     }
 
