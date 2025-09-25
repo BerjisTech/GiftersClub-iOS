@@ -388,7 +388,7 @@ struct LiveCardView: View {
     private let supabase = SupabaseManager.shared
     @StateObject private var previewViewer = LiveKitViewer()
     // Access gating for preview
-    @State private var hasAccessPreview: Bool = true
+    @State private var hasAccessPreview: Bool = false
     @State private var accessType: String? = nil
     @State private var price: Int? = nil
     var onOpen: () -> Void = {}
@@ -409,13 +409,14 @@ struct LiveCardView: View {
             }
             // Preview paywall overlay when locked
             if !hasAccessPreview {
+                Rectangle().fill(Color.black.opacity(0.55))
                 VStack(spacing: 8) {
                     Image(systemName: "lock.fill").foregroundStyle(.white)
                     Text(accessType == "subscription" ? "Subscribe to watch" : "Unlock to watch")
                         .foregroundStyle(.white).font(.footnote.weight(.semibold))
                 }
                 .padding(10)
-                .background(Color.black.opacity(0.5), in: Capsule())
+                .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
                 .padding(.bottom, 60)
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -450,13 +451,18 @@ struct LiveCardView: View {
                 // Check access type and permissions before connecting
                 if let meta = try? await supabase.fetchLiveStreamById(live.id) {
                     await MainActor.run { accessType = meta.access_type; price = meta.price }
-                    if let t = meta.access_type, t != "free" {
-                        var allowed = false
-                        if (supabase.user?.id.uuidString == live.host_id) { allowed = true }
+                    var allowed = false
+                    if let t = meta.access_type {
+                        if t == "free" { allowed = true }
+                        else if (supabase.user?.id.uuidString == live.host_id) { allowed = true }
                         else if t == "subscription" { allowed = (try? await supabase.hasSubscription(to: live.host_id)) ?? false }
                         else if t == "paid" { allowed = (try? await supabase.hasLiveAccess(streamId: live.id)) ?? false }
-                        await MainActor.run { hasAccessPreview = allowed }
+                    } else {
+                        allowed = false
                     }
+                    await MainActor.run { hasAccessPreview = allowed }
+                } else {
+                    await MainActor.run { hasAccessPreview = false }
                 }
                 if hasAccessPreview {
                     var token: String? = nil

@@ -63,7 +63,7 @@ struct LiveViewerView: View {
     @State private var lastTapsForRemote: Int = 0
     @State private var chaff: [HeartParticle] = []
     // Access gating for subscriber-only / paid lives
-    @State private var hasAccessLive: Bool = true
+    @State private var hasAccessLive: Bool = false
     @State private var liveAccessType: String? = nil
     @State private var livePrice: Int? = nil
 
@@ -185,13 +185,20 @@ struct LiveViewerView: View {
             // Check access for subscription/paid
             if let meta = try? await supa.fetchLiveStreamById(live.id) {
                 await MainActor.run { liveAccessType = meta.access_type; livePrice = meta.price }
-                if let t = meta.access_type, t != "free" {
-                    var allowed = false
-                    if (supa.user?.id.uuidString == live.host_id) { allowed = true }
+                var allowed = false
+                if let t = meta.access_type {
+                    if t == "free" { allowed = true }
+                    else if (supa.user?.id.uuidString == live.host_id) { allowed = true }
                     else if t == "subscription" { allowed = (try? await supa.hasSubscription(to: live.host_id)) ?? false }
                     else if t == "paid" { allowed = (try? await supa.hasLiveAccess(streamId: live.id)) ?? false }
-                    await MainActor.run { hasAccessLive = allowed }
+                } else {
+                    // Unknown access type: treat as locked
+                    allowed = false
                 }
+                await MainActor.run { hasAccessLive = allowed }
+            } else {
+                // Unable to fetch metadata; remain locked by default
+                await MainActor.run { hasAccessLive = false }
             }
             // Prefetch moderation settings
             hostFiltered = (try? await supa.fetchFilteredWords(for: live.host_id)) ?? []
@@ -736,12 +743,13 @@ struct LiveViewerView: View {
             }
             .frame(height: 180)
             HStack(spacing: 8) {
-                TextField("Say something…", text: $newComment)
+                TextField(hasAccessLive ? "Say something…" : "Unlock to comment", text: $newComment)
                     .textFieldStyle(.roundedBorder)
+                    .disabled(!hasAccessLive)
                 Button(action: { Task { await sendComment() } }) {
                     Text("Send")
                 }
-                .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || mutedByHost)
+                .disabled(!hasAccessLive || newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || mutedByHost)
                 Button(action: { showGiftsSheet = true }) {
                     Image(systemName: "gift.fill")
                         .foregroundStyle(.white)
