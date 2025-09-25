@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import MessageUI
 
 private enum SettingsTab: String, CaseIterable {
     case profile = "Profile"
@@ -72,6 +73,11 @@ private struct SettingsDetailView: View {
     @State private var subSaving: Bool = false
     @State private var subBenefitInput: String = ""
     @State private var subBenefits: [String] = []
+    @State private var showMailComposer: Bool = false
+    @State private var pendingMailSubject: String? = nil
+    @State private var supportLoading: Bool = false
+    @State private var showSupportChat: Bool = false
+    @State private var supportPartner: ConversationItem.Partner? = nil
 
     var body: some View {
         ScrollView {
@@ -90,7 +96,22 @@ private struct SettingsDetailView: View {
         .navigationTitle(tab.rawValue)
         .navigationBarTitleDisplayMode(.inline)
         .task { await onAppearLoad() }
+        .sheet(isPresented: $showMailComposer, onDismiss: { pendingMailSubject = nil }) {
+            MailComposerView(subject: pendingMailSubject)
+        }
         .sheet(isPresented: $reportSheetVisible) { reportSheet }
+        .background(
+            NavigationLink(isActive: Binding(get: { showSupportChat && supportPartner != nil }, set: { newValue in
+                showSupportChat = newValue
+            })) {
+                if let partner = supportPartner {
+                    ChatDetailView(partner: partner)
+                } else {
+                    EmptyView()
+                }
+            } label: { EmptyView() }
+                .hidden()
+        )
         .overlay(alignment: .top, content: { BannerHost().environmentObject(banners) })
     }
 
@@ -327,7 +348,7 @@ private struct SettingsDetailView: View {
             Text("Help & Support").font(.headline)
             VStack(alignment: .leading, spacing: 12) {
                 LabeledContent("Support Email") {
-                    Button(action: { openMail(subject: nil) }) {
+                    Button(action: { composeMail(subject: nil) }) {
                         Text("accounts@gifters.club")
                             .foregroundStyle(.blue)
                             .underline()
@@ -345,18 +366,83 @@ private struct SettingsDetailView: View {
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
 
             VStack(alignment: .leading, spacing: 12) {
-                Button(action: { openMail(subject: "Support Request") }) {
-                    Label("Contact Support", systemImage: "envelope")
+                Button(action: { Task { await contactSupport() } }) {
+                    if supportLoading {
+                        HStack {
+                            ProgressView()
+                            Text("Contact Support")
+                        }
                         .frame(maxWidth: .infinity)
+                    } else {
+                        Label("Contact Support", systemImage: "envelope")
+                            .frame(maxWidth: .infinity)
+                    }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(supportLoading)
 
-                Button(action: { openMail(subject: "Report Abuse") }) {
+                NavigationLink(destination: SettingsDetailView(tab: .security)) {
                     Label("Report Abuse", systemImage: "exclamationmark.bubble")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
             }
+        }
+    }
+
+    private let supportEmail = "101giftersclub@gmail.com"
+
+
+    private func buildSupportPartner() async throws -> ConversationItem.Partner? {
+        let supportId = "2ec40219-83b4-4d03-b3e9-78a0e921ffc9"
+        if let cached = supportPartner, cached.userId == supportId { return cached }
+        if let profile = try await supabase.fetchProfile(username: nil, userId: supportId) {
+            return ConversationItem.Partner(
+                userId: supportId,
+                username: profile.username,
+                displayName: profile.name?.isEmpty == false ? profile.name! : profile.username,
+                imageURL: profile.image.flatMap(URL.init(string:))
+            )
+        }
+        return nil
+    }
+
+    private func contactSupport() async {
+        guard supabase.user != nil else {
+            await MainActor.run { banners.show(Banner(title: "Sign in to contact support", style: .warning)) }
+            return
+        }
+        await MainActor.run { supportLoading = true }
+        do {
+            if supportPartner == nil {
+                if let partner = try await buildSupportPartner() {
+                    await MainActor.run { supportPartner = partner }
+                } else {
+                    await MainActor.run {
+                        supportLoading = false
+                        banners.show(Banner(title: "Support account unavailable", style: .error))
+                    }
+                    return
+                }
+            }
+            await MainActor.run {
+                supportLoading = false
+                showSupportChat = true
+            }
+        } catch {
+            await MainActor.run {
+                supportLoading = false
+                banners.show(Banner(title: "Unable to contact support", style: .error))
+            }
+        }
+    }
+
+    private func composeMail(subject: String?) {
+        if MFMailComposeViewController.canSendMail() {
+            pendingMailSubject = subject
+            showMailComposer = true
+        } else {
+            openMail(subject: subject)
         }
     }
 
@@ -433,4 +519,28 @@ private struct SettingsDetailView: View {
         } catch { banners.show(Banner(title: "Failed to save plan", style: .error)) }
     }
     private func deletePlan(_ id: String) async { do { try await supabase.deleteSubscriptionPlan(id: id); await loadPlans(); banners.show(Banner(title: "Plan deleted", style: .success)) } catch { banners.show(Banner(title: "Failed to delete plan", style: .error)) } }
+}
+
+private struct MailComposerView: UIViewControllerRepresentable {
+    let subject: String?
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIViewController(context: Context) -> MFMailComposeViewController {
+        let vc = MFMailComposeViewController()
+        vc.mailComposeDelegate = context.coordinator
+        vc.setToRecipients(["accounts@gifters.club"])
+        if let subject, !subject.isEmpty { vc.setSubject(subject) }
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: MFMailComposeViewController, context: Context) {}
+
+    final class Coordinator: NSObject, MFMailComposeViewControllerDelegate {
+        func mailComposeController(_ controller: MFMailComposeViewController,
+                                   didFinishWith result: MFMailComposeResult,
+                                   error: Error?) {
+            controller.dismiss(animated: true)
+        }
+    }
 }
