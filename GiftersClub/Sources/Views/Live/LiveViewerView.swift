@@ -701,43 +701,8 @@ struct LiveViewerView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(comments) { c in
-                        HStack(alignment: .top, spacing: 8) {
-                            if let p = profilesCache[c.user_id], let urlStr = p.image, let url = URL(string: urlStr) {
-                                AsyncImage(url: url) { img in
-                                    img.resizable().scaledToFill()
-                                } placeholder: { Color.white.opacity(0.2) }
-                                .frame(width: 20, height: 20)
-                                .clipShape(Circle())
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(username(for: c.user_id))
-                                        .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(userColor(c.user_id))
-                                    if let p = profilesCache[c.user_id], let lvl = p.gifter_level, lvl > 0 {
-                                        Text("Lv \(lvl)")
-                                            .font(.caption2.weight(.bold))
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Color.white.opacity(0.25))
-                                            .clipShape(Capsule())
-                                    }
-                                }
-                                Text(c.content)
-                                    .font(.footnote)
-                                    .foregroundStyle(.white)
-                            }
-                        }
-                        .contextMenu {
-                            if amModerator {
-                                Button("Mute user") { Task { try? await supa.muteUser(hostId: live.host_id, targetUserId: c.user_id) } }
-                                Button("Block user", role: .destructive) { Task { try? await supa.blockUserForHost(hostId: live.host_id, targetUserId: c.user_id) } }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .id(c.id)
+                    ForEach(comments) { comment in
+                        commentRow(comment)
                     }
                 }
                 Color.clear.frame(height: 1)
@@ -750,7 +715,8 @@ struct LiveViewerView: View {
             }
             .frame(height: 180)
             HStack(spacing: 8) {
-                TextField(hasAccessLive ? "Say something…" : "Unlock to comment", text: $newComment)
+                TextField(hasAccessLive ? "Say something…" : "Unlock to comment", text: $newComment, axis: .vertical)
+                    .lineLimit(1...4)
                     .textFieldStyle(.roundedBorder)
                     .disabled(!hasAccessLive)
                 Button(action: { Task { await sendComment() } }) {
@@ -797,6 +763,82 @@ struct LiveViewerView: View {
             }
         }
         return String(userId.prefix(6)) + "…"
+    }
+
+    @ViewBuilder
+    private func commentRow(_ comment: SupabaseManager.DBLiveStreamComment) -> some View {
+        let alias = username(for: comment.user_id)
+        let profile = profilesCache[comment.user_id]
+        let bodyText = inlineCommentBody(for: comment.content, alias: alias)
+        HStack(alignment: .top, spacing: 8) {
+            if let profile, let urlStr = profile.image, let url = URL(string: urlStr) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    Color.white.opacity(0.2)
+                }
+                .frame(width: 20, height: 20)
+                .clipShape(Circle())
+            } else {
+                Circle()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 20, height: 20)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(alias)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(userColor(comment.user_id))
+                    .lineLimit(1)
+                if let level = profile?.gifter_level, level > 0 {
+                    Text("Lv \(level)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.25))
+                        .clipShape(Capsule())
+                        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] }
+                }
+                Text(bodyText)
+                    .font(.footnote)
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contextMenu {
+            if amModerator {
+                Button("Mute user") {
+                    Task { try? await supa.muteUser(hostId: live.host_id, targetUserId: comment.user_id) }
+                }
+                Button("Block user", role: .destructive) {
+                    Task { try? await supa.blockUserForHost(hostId: live.host_id, targetUserId: comment.user_id) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .id(comment.id)
+    }
+
+    // Drop the username prefix when the stored comment already includes it so the inline row doesn't repeat the handle.
+    private func inlineCommentBody(for content: String, alias: String) -> String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !alias.isEmpty else { return trimmed }
+        let aliasLower = alias.lowercased()
+        let lower = trimmed.lowercased()
+        let separators: [Character] = [" ", ":", "—", "-", "·", ","]
+        for separator in separators {
+            let pattern = aliasLower + String(separator)
+            if lower.hasPrefix(pattern) {
+                var remainder = trimmed.dropFirst(alias.count)
+                if let first = remainder.first, first == separator {
+                    remainder = remainder.dropFirst()
+                }
+                let result = remainder.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !result.isEmpty { return result }
+            }
+        }
+        return trimmed
     }
 
     private func join() async {

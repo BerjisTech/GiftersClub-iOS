@@ -355,7 +355,8 @@ struct LiveBroadcastView: View {
 
             // Comment composer (host) between camera and gift
             HStack(spacing: 6) {
-                TextField("Say something…", text: $newComment)
+                TextField("Say something…", text: $newComment, axis: .vertical)
+                    .lineLimit(1...4)
                     .textFieldStyle(.roundedBorder)
                     .frame(minWidth: 120)
                 Button("Send") { Task { await sendComment() } }
@@ -386,45 +387,8 @@ struct LiveBroadcastView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(comments, id: \.id) { c in
-                        HStack(alignment: .top, spacing: 8) {
-                            if let p = profilesCache[c.user_id], let img = p.image, let url = URL(string: img) {
-                                AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.2) }
-                                    .frame(width: 20, height: 20)
-                                    .clipShape(Circle())
-                            } else {
-                                Circle().fill(Color.white.opacity(0.2)).frame(width: 20, height: 20)
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(username(for: c.user_id))
-                                        .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(userColor(c.user_id))
-                                    if let p = profilesCache[c.user_id], let lvl = p.gifter_level, lvl > 0 {
-                                        Text("Lv \(lvl)")
-                                            .font(.caption2.weight(.bold))
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Color.white.opacity(0.25))
-                                            .clipShape(Capsule())
-                                    }
-                                }
-                                Text(c.content)
-                                    .font(.footnote)
-                                    .foregroundStyle(.white)
-                            }
-                        }
-                        .contextMenu {
-                            Button("Mute user") { Task { try? await supa.muteUser(hostId: stream.host_id, targetUserId: c.user_id); banners.show(Banner(title: "User muted", style: .success)) } }
-                            if moderatorIds.contains(c.user_id) {
-                                Button("Remove moderator") { Task { try? await supa.removeLiveModerator(hostId: stream.host_id, moderatorUserId: c.user_id); await refreshModerators(); banners.show(Banner(title: "Moderator removed", style: .success)) } }
-                            } else {
-                                Button("Make moderator") { Task { try? await supa.addLiveModerator(hostId: stream.host_id, moderatorUserId: c.user_id); await refreshModerators(); banners.show(Banner(title: "Added moderator", style: .success)) } }
-                            }
-                            Button("Block user", role: .destructive) { Task { try? await supa.blockUser(targetUserId: c.user_id); banners.show(Banner(title: "User blocked", style: .success)) } }
-                        }
-                        .id(c.id)
+                    ForEach(comments, id: \.id) { comment in
+                        commentRow(comment)
                     }
                     Color.clear.frame(height: 1)
                         .id("bottom")
@@ -543,10 +507,18 @@ struct LiveBroadcastView: View {
         do {
             // Configure audio session for low-latency voice/video to avoid AVAudioEngine errors (-3010)
             let session = AVAudioSession.sharedInstance()
-            try? session.setCategory(.playAndRecord, mode: .videoChat, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
-            try? session.setPreferredSampleRate(48000)
-            try? session.setPreferredIOBufferDuration(0.005)
-            try? session.setActive(true, options: .notifyOthersOnDeactivation)
+            do {
+                try session.setCategory(.playAndRecord, mode: .videoChat, options: [.defaultToSpeaker, .allowBluetooth])
+                try session.setPreferredSampleRate(48_000)
+                try session.setPreferredIOBufferDuration(0.01)
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+            } catch {
+                let nsError = error as NSError
+                let hint = nsError.code == 3010 ? "Another app may be using the microphone. Close other audio apps and try again." : nil
+                let message = [nsError.localizedDescription, hint].compactMap { $0 }.joined(separator: "\n")
+                await MainActor.run { errorText = message }
+                return
+            }
             // Mark live in DB
             _ = try await supa.updateLiveSession(id: stream.id, updates: ["status": "live", "started_at": iso])
             // Connect to LiveKit and publish camera+mic
@@ -957,6 +929,102 @@ struct LiveBroadcastView: View {
         return String(userId.prefix(6)) + "…"
     }
 
+    @ViewBuilder
+    private func commentRow(_ comment: SupabaseManager.DBLiveStreamComment) -> some View {
+        let alias = username(for: comment.user_id)
+        let profile = profilesCache[comment.user_id]
+        let bodyText = inlineCommentBody(for: comment.content, alias: alias)
+        HStack(alignment: .top, spacing: 8) {
+            if let profile, let img = profile.image, let url = URL(string: img) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    Color.white.opacity(0.2)
+                }
+                .frame(width: 20, height: 20)
+                .clipShape(Circle())
+            } else {
+                Circle()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 20, height: 20)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(alias)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(userColor(comment.user_id))
+                    .lineLimit(1)
+                if let level = profile?.gifter_level, level > 0 {
+                    Text("Lv \(level)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.25))
+                        .clipShape(Capsule())
+                        .alignmentGuide(.firstTextBaseline) { d in d[.firstTextBaseline] }
+                }
+                Text(bodyText)
+                    .font(.footnote)
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contextMenu {
+            Button("Mute user") {
+                Task {
+                    try? await supa.muteUser(hostId: stream.host_id, targetUserId: comment.user_id)
+                    banners.show(Banner(title: "User muted", style: .success))
+                }
+            }
+            if moderatorIds.contains(comment.user_id) {
+                Button("Remove moderator") {
+                    Task {
+                        try? await supa.removeLiveModerator(hostId: stream.host_id, moderatorUserId: comment.user_id)
+                        await refreshModerators()
+                        banners.show(Banner(title: "Moderator removed", style: .success))
+                    }
+                }
+            } else {
+                Button("Make moderator") {
+                    Task {
+                        try? await supa.addLiveModerator(hostId: stream.host_id, moderatorUserId: comment.user_id)
+                        await refreshModerators()
+                        banners.show(Banner(title: "Added moderator", style: .success))
+                    }
+                }
+            }
+            Button("Block user", role: .destructive) {
+                Task {
+                    try? await supa.blockUser(targetUserId: comment.user_id)
+                    banners.show(Banner(title: "User blocked", style: .success))
+                }
+            }
+        }
+        .id(comment.id)
+    }
+
+    // Drop the username prefix when the stored comment already includes it so the inline row doesn't repeat the handle.
+    private func inlineCommentBody(for content: String, alias: String) -> String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !alias.isEmpty else { return trimmed }
+        let aliasLower = alias.lowercased()
+        let lower = trimmed.lowercased()
+        let separators: [Character] = [" ", ":", "—", "-", "·", ","]
+        for separator in separators {
+            let pattern = aliasLower + String(separator)
+            if lower.hasPrefix(pattern) {
+                var remainder = trimmed.dropFirst(alias.count)
+                if let first = remainder.first, first == separator {
+                    remainder = remainder.dropFirst()
+                }
+                let result = remainder.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !result.isEmpty { return result }
+            }
+        }
+        return trimmed
+    }
+
     private func userColor(_ id: String) -> Color {
         var hash: UInt64 = 5381
         for u in id.utf8 { hash = ((hash << 5) &+ hash) &+ UInt64(u) }
@@ -969,6 +1037,9 @@ struct LiveBroadcastView: View {
         do {
             // Disconnect from LiveKit and mark ended
             await publisher.disconnect()
+            do {
+                try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            } catch {}
             _ = try await supa.updateLiveSession(id: stream.id, updates: ["status": "ended", "ended_at": iso])
             await MainActor.run { dismiss() }
         } catch {
