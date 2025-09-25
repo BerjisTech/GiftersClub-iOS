@@ -970,5 +970,5 @@ struct LiveBroadcastView: View {
 }
 
 #Preview {
-    LiveBroadcastView(stream: .init(id: UUID().uuidString, host_id: UUID().uuidString, title: "My Stream", description: "", status: "scheduled", viewer_count: 0, taps: 0, started_at: nil, ended_at: nil, token: "tok"))
+    LiveBroadcastView(stream: .init(id: UUID().uuidString, host_id: UUID().uuidString, title: "My Stream", description: "", status: "scheduled", viewer_count: 0, taps: 0, started_at: nil, ended_at: nil, access_type: "free", price: nil, required_plan_id: nil, token: "tok"))
 }

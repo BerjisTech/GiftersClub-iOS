@@ -653,6 +653,9 @@ final class SupabaseManager: ObservableObject {
         let taps: Int?
         let started_at: String?
         let ended_at: String?
+        let access_type: String?
+        let price: Int?
+        let required_plan_id: String?
         // Edge function may attach an ephemeral LiveKit token for host/viewer
         let token: String?
     }
@@ -1097,17 +1100,48 @@ final class SupabaseManager: ObservableObject {
 
     // MARK: - Lightweight DB fetches for live previews
     func fetchLiveStreamById(_ id: String) async throws -> DBLiveStream? {
-        struct Row: Decodable { let id: String; let host_id: String; let title: String; let description: String?; let status: String; let viewer_count: Int?; let taps: Int?; let started_at: String?; let ended_at: String? }
+        struct Row: Decodable { let id: String; let host_id: String; let title: String; let description: String?; let status: String; let viewer_count: Int?; let taps: Int?; let started_at: String?; let ended_at: String?; let access_type: String?; let price: Int?; let required_plan_id: String? }
         let res: PostgrestResponse<[Row]> = try await client
             .from("live_streams")
-            .select("id,host_id,title,description,status,viewer_count,taps,started_at,ended_at")
+            .select("id,host_id,title,description,status,viewer_count,taps,started_at,ended_at,access_type,price,required_plan_id")
             .eq("id", value: id)
             .limit(1)
             .execute()
         if let r = res.value.first {
-            return DBLiveStream(id: r.id, host_id: r.host_id, title: r.title, description: r.description, status: r.status, viewer_count: r.viewer_count, taps: r.taps, started_at: r.started_at, ended_at: r.ended_at, token: nil)
+            return DBLiveStream(id: r.id, host_id: r.host_id, title: r.title, description: r.description, status: r.status, viewer_count: r.viewer_count, taps: r.taps, started_at: r.started_at, ended_at: r.ended_at, access_type: r.access_type, price: r.price, required_plan_id: r.required_plan_id, token: nil)
         }
         return nil
+    }
+
+    // MARK: - Live Access
+    func hasLiveAccess(streamId: String) async throws -> Bool {
+        guard let me = user?.id.uuidString else { return false }
+        struct Row: Decodable { let id: String }
+        let res: PostgrestResponse<[Row]> = try await client
+            .from("live_access")
+            .select("id")
+            .eq("live_stream_id", value: streamId)
+            .eq("user_id", value: me)
+            .limit(1)
+            .execute()
+        return !res.value.isEmpty
+    }
+    /// Attempt to purchase one-time access to a live stream via Edge Function.
+    func purchaseLiveAccess(streamId: String, tokens: Int) async throws {
+        guard let _ = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }
+        let functionURL = SupabaseConfig.url.appendingPathComponent("functions/v1/purchase-live")
+        var req = URLRequest(url: functionURL)
+        req.httpMethod = "POST"
+        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        if let token = try? await client.auth.session.accessToken { req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["streamId": streamId, "tokens": tokens]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw NSError(domain: "PurchaseLive", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg ?? "Purchase failed"])
+        }
     }
 
     // Realtime taps subscription

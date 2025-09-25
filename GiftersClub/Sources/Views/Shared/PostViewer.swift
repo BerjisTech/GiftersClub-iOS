@@ -152,8 +152,11 @@ private struct AutoPlayVideo: View {
     @State private var player: AVPlayer? = nil
     @State private var endObserver: NSObjectProtocol? = nil
     @State private var statusObserver: NSKeyValueObservation? = nil
+    @State private var timeObserver: Any? = nil
+    @State private var timeObserverOwner: AVPlayer? = nil
     @State private var showErrorOverlay = false
     @State private var isBuffering = true
+    @State private var attemptedFallback = false
     var body: some View {
         ZStack(alignment: .center) {
             VideoPlayer(player: player)
@@ -172,50 +175,79 @@ private struct AutoPlayVideo: View {
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
-        .onAppear {
-            rebuildPlayer()
-        }
+        .onAppear { rebuildPlayer() }
         .onChange(of: play, perform: { p in if p { player?.play() } else { player?.pause() } })
-        .onDisappear {
-            player?.pause()
-            if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
-            endObserver = nil
-            statusObserver?.invalidate(); statusObserver = nil
-        }
+        .onDisappear { cleanupObservers(); player?.pause() }
     }
 
-    private func rebuildPlayer() {
+    private func rebuildPlayer(forceMP4: Bool = false) {
         isBuffering = true
         showErrorOverlay = false
-        let asset = AVURLAsset(url: url)
-        let item = AVPlayerItem(asset: asset)
-        if player == nil { player = AVPlayer() }
-        player?.automaticallyWaitsToMinimizeStalling = true
-        player?.replaceCurrentItem(with: item)
+        cleanupObservers()
+        let p = makePlayer(for: url, forceMP4: forceMP4)
+        player = p
+        attachObservers(to: p)
+        if play { p.play() }
+    }
+
+    private func attachObservers(to p: AVPlayer) {
         // Loop on end
-        if let p = player, endObserver == nil {
-            endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main) { _ in
-                p.seek(to: .zero)
-                if play { p.play() }
-            }
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main) { _ in
+            p.seek(to: .zero)
+            if play { p.play() }
         }
-        statusObserver?.invalidate(); statusObserver = nil
-        statusObserver = item.observe(\.status, options: [.new]) { it, _ in
-            DispatchQueue.main.async {
-                switch it.status {
-                case .readyToPlay:
-                    isBuffering = false
-                    if play { player?.play() }
-                case .failed:
-                    isBuffering = false
-                    showErrorOverlay = true
-                default: break
+        // Progress hides loader
+        timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { t in
+            if t.seconds > 0.05 { isBuffering = false }
+        }
+        timeObserverOwner = p
+        // Status observer for ready/failed
+        if let item = p.currentItem {
+            statusObserver = item.observe(\.status, options: [.new]) { it, _ in
+                DispatchQueue.main.async {
+                    switch it.status {
+                    case .readyToPlay:
+                        isBuffering = false; showErrorOverlay = false
+                    case .failed:
+                        isBuffering = false; showErrorOverlay = true
+                        if !attemptedFallback {
+                            attemptedFallback = true
+                            // Rebuild forcing MP4 MIME hint for octet-stream/unknown
+                            rebuildPlayer(forceMP4: true)
+                        }
+                    default: break
+                    }
                 }
             }
         }
     }
 
-    // No HEAD/MIME probing; rely on AVFoundation to determine format.
+    private func cleanupObservers() {
+        if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
+        endObserver = nil
+        if let to = timeObserver, let owner = timeObserverOwner { owner.removeTimeObserver(to) }
+        timeObserver = nil
+        timeObserverOwner = nil
+        statusObserver?.invalidate(); statusObserver = nil
+    }
+
+    private func makePlayer(for url: URL, forceMP4: Bool = false) -> AVPlayer {
+        let ext = url.pathExtension.lowercased()
+        if !forceMP4 && (ext == "m3u8" || url.absoluteString.contains(".m3u8")) {
+            return AVPlayer(url: url)
+        }
+        let asset: AVURLAsset
+        if forceMP4 || ext.isEmpty || ext == "bin" || ext == "dat" {
+            let options: [String: Any] = ["AVURLAssetOutOfBandMIMETypeKey": "video/mp4"]
+            asset = AVURLAsset(url: url, options: options)
+        } else {
+            asset = AVURLAsset(url: url)
+        }
+        let item = AVPlayerItem(asset: asset)
+        let p = AVPlayer(playerItem: item)
+        p.automaticallyWaitsToMinimizeStalling = true
+        return p
+    }
 }
 
 private struct ZoomableAsyncImage: View {

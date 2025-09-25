@@ -62,12 +62,16 @@ struct LiveViewerView: View {
     @State private var totalTaps: Int = 0
     @State private var lastTapsForRemote: Int = 0
     @State private var chaff: [HeartParticle] = []
+    // Access gating for subscriber-only / paid lives
+    @State private var hasAccessLive: Bool = true
+    @State private var liveAccessType: String? = nil
+    @State private var livePrice: Int? = nil
 
     var body: some View {
         ZStack {
             if ended {
                 endedView
-            } else if !viewer.remoteVideoTracks.isEmpty {
+            } else if hasAccessLive && !viewer.remoteVideoTracks.isEmpty {
                 ZStack {
                     videoGrid
                     if battleActive {
@@ -79,7 +83,7 @@ struct LiveViewerView: View {
                         .allowsHitTesting(false)
                     }
                 }
-            } else if let track = viewer.remoteVideoTrack {
+            } else if hasAccessLive, let track = viewer.remoteVideoTrack {
                 LKVideoView(track: track)
                     .scaleEffect(x: -1, y: 1) // mirror horizontally to match Angular (-scale-x-100)
                     .ignoresSafeArea()
@@ -93,6 +97,26 @@ struct LiveViewerView: View {
                 }
                 .scaleEffect(x: -1, y: 1)
                 .ignoresSafeArea()
+            }
+            // Paywall overlay for locked lives (subscribe or unlock)
+            if !ended && !hasAccessLive {
+                Rectangle().fill(Color.black.opacity(0.75)).ignoresSafeArea()
+                VStack(spacing: 12) {
+                    Image(systemName: "lock.fill").font(.largeTitle).foregroundStyle(.white)
+                    Text((liveAccessType == "subscription") ? "Subscribe to watch" : "Unlock to watch").foregroundStyle(.white)
+                    if liveAccessType == "paid" {
+                        Button(action: { Task { await unlockLive() } }) {
+                            Text(livePrice != nil ? "Unlock for \(livePrice!) tokens" : "Unlock")
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                        }.buttonStyle(.borderedProminent)
+                    } else if liveAccessType == "subscription" {
+                        Button(action: { Task { await subscribeToHost() } }) {
+                            Text("Subscribe").padding(.horizontal, 16).padding(.vertical, 10)
+                        }.buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding()
+                .zIndex(5)
             }
 
             if !ended {
@@ -158,11 +182,22 @@ struct LiveViewerView: View {
                 await MainActor.run { errorText = "You cannot join this live"; ended = true }
                 return
             }
+            // Check access for subscription/paid
+            if let meta = try? await supa.fetchLiveStreamById(live.id) {
+                await MainActor.run { liveAccessType = meta.access_type; livePrice = meta.price }
+                if let t = meta.access_type, t != "free" {
+                    var allowed = false
+                    if (supa.user?.id.uuidString == live.host_id) { allowed = true }
+                    else if t == "subscription" { allowed = (try? await supa.hasSubscription(to: live.host_id)) ?? false }
+                    else if t == "paid" { allowed = (try? await supa.hasLiveAccess(streamId: live.id)) ?? false }
+                    await MainActor.run { hasAccessLive = allowed }
+                }
+            }
             // Prefetch moderation settings
             hostFiltered = (try? await supa.fetchFilteredWords(for: live.host_id)) ?? []
             mutedByHost = (try? await supa.isUserMutedBy(hostId: live.host_id)) ?? false
             amModerator = await supa.isModeratorOfHost(hostId: live.host_id)
-            await join()
+            if hasAccessLive { await join() }
             await supa.recordViewerJoin(streamId: live.id)
             await loadComments(); await startStatusPolling()
             // Cohost comments: switch to realtime across stream ids (fallback timer disabled by default)
@@ -184,7 +219,7 @@ struct LiveViewerView: View {
                 }
                 // Initial load of existing comments across cohost streams
                 if let list = try? await supa.fetchLiveCommentsMulti(streamIds: ids) {
-                    await MainActor.run { comments = list }
+                    await MainActor.run { comments = list; ensureSystemJoinMessages() }
                     for c in list {
                         if profilesCache[c.user_id] == nil, let p = try? await supa.fetchProfileByUserId(c.user_id) {
                             await MainActor.run { profilesCache[c.user_id] = p }
@@ -786,9 +821,45 @@ struct LiveViewerView: View {
         commentsTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
             Task {
                 if let list = try? await supa.fetchLiveComments(streamId: live.id) {
-                    await MainActor.run { comments = list }
+                    await MainActor.run { comments = list; ensureSystemJoinMessages() }
                 }
             }
+        }
+    }
+
+    private func ensureSystemJoinMessages() {
+        // Insert two local-only banner comments: title and code-of-conduct
+        let titleId = "sys-title"
+        if !comments.contains(where: { $0.id == titleId }) {
+            let c = SupabaseManager.DBLiveStreamComment(id: titleId, live_stream_id: live.id, user_id: live.host_id, content: "🔴 \(live.title)", created_at: nil)
+            comments.insert(c, at: 0)
+        }
+        let rulesId = "sys-rules"
+        if !comments.contains(where: { $0.id == rulesId }) {
+            let msg = "Be respectful. Avoid sexual content. Follow the rules."
+            let c = SupabaseManager.DBLiveStreamComment(id: rulesId, live_stream_id: live.id, user_id: live.host_id, content: msg, created_at: nil)
+            comments.insert(c, at: min(1, comments.count))
+        }
+    }
+
+    private func unlockLive() async {
+        guard let price = livePrice else { return }
+        do {
+            try await supa.purchaseLiveAccess(streamId: live.id, tokens: price)
+            await MainActor.run { hasAccessLive = true }
+            await join()
+        } catch {
+            await MainActor.run { errorText = (error as NSError).localizedDescription }
+        }
+    }
+
+    private func subscribeToHost() async {
+        do {
+            try await supa.subscribeToCreator(creatorId: live.host_id, tokens: 0, duration: .monthly)
+            await MainActor.run { hasAccessLive = true }
+            await join()
+        } catch {
+            await MainActor.run { errorText = (error as NSError).localizedDescription }
         }
     }
 

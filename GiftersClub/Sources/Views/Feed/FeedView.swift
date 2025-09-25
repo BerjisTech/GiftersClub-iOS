@@ -387,10 +387,14 @@ struct LiveCardView: View {
     @State private var timer: Timer? = nil
     private let supabase = SupabaseManager.shared
     @StateObject private var previewViewer = LiveKitViewer()
+    // Access gating for preview
+    @State private var hasAccessPreview: Bool = true
+    @State private var accessType: String? = nil
+    @State private var price: Int? = nil
     var onOpen: () -> Void = {}
     var body: some View {
         ZStack(alignment: .bottom) {
-            if previewViewer.remoteVideoTrack != nil {
+            if hasAccessPreview && previewViewer.remoteVideoTrack != nil {
                 LKVideoView(track: previewViewer.remoteVideoTrack)
                     .scaleEffect(x: -1, y: 1)
                     .ignoresSafeArea()
@@ -402,6 +406,17 @@ struct LiveCardView: View {
                     LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
                 }
                 .ignoresSafeArea()
+            }
+            // Preview paywall overlay when locked
+            if !hasAccessPreview {
+                VStack(spacing: 8) {
+                    Image(systemName: "lock.fill").foregroundStyle(.white)
+                    Text(accessType == "subscription" ? "Subscribe to watch" : "Unlock to watch")
+                        .foregroundStyle(.white).font(.footnote.weight(.semibold))
+                }
+                .padding(10)
+                .background(Color.black.opacity(0.5), in: Capsule())
+                .padding(.bottom, 60)
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
@@ -432,10 +447,23 @@ struct LiveCardView: View {
             }
             // Inline live preview
             do {
-                var token: String? = nil
-                if let session = try? await supabase.fetchLiveSession(live.id), let t = session.token, !t.isEmpty { token = t }
-                else { token = try? await supabase.fetchLiveViewerToken(streamId: live.id) }
-                if let tok = token, !tok.isEmpty { try? await previewViewer.connect(url: SupabaseConfig.livekitURL, token: tok) }
+                // Check access type and permissions before connecting
+                if let meta = try? await supabase.fetchLiveStreamById(live.id) {
+                    await MainActor.run { accessType = meta.access_type; price = meta.price }
+                    if let t = meta.access_type, t != "free" {
+                        var allowed = false
+                        if (supabase.user?.id.uuidString == live.host_id) { allowed = true }
+                        else if t == "subscription" { allowed = (try? await supabase.hasSubscription(to: live.host_id)) ?? false }
+                        else if t == "paid" { allowed = (try? await supabase.hasLiveAccess(streamId: live.id)) ?? false }
+                        await MainActor.run { hasAccessPreview = allowed }
+                    }
+                }
+                if hasAccessPreview {
+                    var token: String? = nil
+                    if let session = try? await supabase.fetchLiveSession(live.id), let t = session.token, !t.isEmpty { token = t }
+                    else { token = try? await supabase.fetchLiveViewerToken(streamId: live.id) }
+                    if let tok = token, !tok.isEmpty { try? await previewViewer.connect(url: SupabaseConfig.livekitURL, token: tok) }
+                }
             }
         }
         .onDisappear { timer?.invalidate(); timer = nil; Task { await previewViewer.disconnect() } }
@@ -631,13 +659,17 @@ struct PostPageView: View {
         case .images(let urls):
             CarouselView(urls: urls, index: $activeImageIndex)
         case .video(let url):
-            VideoBackgroundView(url: url, play: isActive && !isPaused && hasAccess)
+            if hasAccess {
+                VideoBackgroundView(url: url, play: isActive && !isPaused && hasAccess)
+            } else {
+                Color.black
+            }
         }
     }
 
     private var paywall: some View {
         ZStack {
-            Rectangle().fill(Color.black.opacity(0.65)).ignoresSafeArea()
+            Rectangle().fill(Color.black.opacity(0.9)).ignoresSafeArea()
             VStack(spacing: 12) {
                 Image(systemName: "lock.fill").font(.largeTitle).foregroundStyle(.white)
                 Text(post.accessType == "subscription" ? "Subscribe to view" : "Purchase to view")
@@ -1009,9 +1041,11 @@ private struct VideoBackgroundView: View {
     @State private var player: AVPlayer? = nil
     @State private var endObserver: NSObjectProtocol? = nil
     @State private var timeObserver: Any? = nil
+    @State private var timeObserverOwner: AVPlayer? = nil
     @State private var showLoadingBar: Bool = true
     @State private var statusObserver: NSKeyValueObservation? = nil
     @State private var showErrorOverlay = false
+    @State private var attemptedFallback = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -1028,39 +1062,87 @@ private struct VideoBackgroundView: View {
             }
         }
         .onAppear {
-                if player == nil { player = AVPlayer(url: url) }
-                if let p = player, endObserver == nil {
-                    endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main) { _ in
-                        p.seek(to: .zero)
-                        if play { p.play() }
-                    }
-                    // Hide loading bar once playback advances
-                    timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { t in
-                        if t.seconds > 0.05 { showLoadingBar = false }
-                    }
-                    // Also hide when item becomes ready (even if not playing)
-                    if let item = p.currentItem {
-                        statusObserver = item.observe(\.status, options: [.new]) { it, _ in
-                            if it.status == .readyToPlay { showLoadingBar = false; showErrorOverlay = false }
-                            if it.status == .failed { showLoadingBar = false; showErrorOverlay = true }
-                        }
-                    }
-                }
-                if play { player?.play() }
+            if player == nil {
+                let p = makePlayer(for: url)
+                player = p
+                attachObservers(to: p)
+            } else if endObserver == nil || timeObserver == nil || statusObserver == nil {
+                if let p = player { attachObservers(to: p) }
             }
-            .onChange(of: play, perform: { playing in
-                if playing { player?.play() } else { player?.pause() }
-            })
-            .onDisappear {
-                player?.pause()
-                if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
-                endObserver = nil
-                if let to = timeObserver { player?.removeTimeObserver(to); timeObserver = nil }
-                statusObserver?.invalidate(); statusObserver = nil
-            }
+            if play { player?.play() }
+        }
+        .onChange(of: play, perform: { playing in
+            if playing { player?.play() } else { player?.pause() }
+        })
+        .onDisappear {
+            player?.pause()
+            cleanupObservers()
+        }
     }
 
     // No HEAD probing; rely on AVFoundation
+    private func makePlayer(for url: URL, forceMP4: Bool = false) -> AVPlayer {
+        // Heuristics for content types: default to MP4; support HLS; fallback for octet-streams
+        let ext = url.pathExtension.lowercased()
+        if !forceMP4 && (ext == "m3u8" || url.absoluteString.contains(".m3u8")) {
+            return AVPlayer(url: url)
+        }
+        let asset: AVURLAsset
+        if forceMP4 || ext.isEmpty || ext == "bin" || ext == "dat" {
+            let options: [String: Any] = ["AVURLAssetOutOfBandMIMETypeKey": "video/mp4"]
+            asset = AVURLAsset(url: url, options: options)
+        } else {
+            asset = AVURLAsset(url: url, options: nil)
+        }
+        let item = AVPlayerItem(asset: asset)
+        let p = AVPlayer(playerItem: item)
+        p.automaticallyWaitsToMinimizeStalling = true
+        return p
+    }
+
+    private func attachObservers(to p: AVPlayer) {
+        // Playback end -> loop
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main) { _ in
+            p.seek(to: .zero)
+            if play { p.play() }
+        }
+        // Progress -> hide loader
+        timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { t in
+            if t.seconds > 0.05 { showLoadingBar = false }
+        }
+        timeObserverOwner = p
+        // Item status -> ready/failed handling
+        if let item = p.currentItem {
+            statusObserver = item.observe(\.status, options: [.new]) { it, _ in
+                if it.status == .readyToPlay { showLoadingBar = false; showErrorOverlay = false }
+                if it.status == .failed {
+                    showLoadingBar = false; showErrorOverlay = true
+                    if !attemptedFallback {
+                        attemptedFallback = true
+                        // Cleanup current observers before swapping players
+                        cleanupObservers()
+                        let newP = makePlayer(for: url, forceMP4: true)
+                        player = newP
+                        showErrorOverlay = false
+                        showLoadingBar = true
+                        attachObservers(to: newP)
+                        if play { newP.play() }
+                    }
+                }
+            }
+        }
+    }
+
+    private func cleanupObservers() {
+        if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
+        endObserver = nil
+        if let to = timeObserver, let owner = timeObserverOwner {
+            owner.removeTimeObserver(to)
+        }
+        timeObserver = nil
+        timeObserverOwner = nil
+        statusObserver?.invalidate(); statusObserver = nil
+    }
 }
 
 private struct AsyncAvatar: View {
