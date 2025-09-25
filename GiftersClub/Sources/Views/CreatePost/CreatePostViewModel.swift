@@ -190,13 +190,15 @@ final class CreatePostViewModel: ObservableObject {
         session.outputURL = outputURL
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
-        return await withUnsafeContinuation { cont in
-            session.exportAsynchronously { [inputURL, outputURL] in
+        final class SendableBox<T>: @unchecked Sendable { var value: T; init(_ v: T) { value = v } }
+        let box = SendableBox(session)
+        return await withCheckedContinuation { cont in
+            box.value.exportAsynchronously { [inputURL, outputURL] in
                 defer {
                     try? FileManager.default.removeItem(at: inputURL)
                     try? FileManager.default.removeItem(at: outputURL)
                 }
-                guard session.status == .completed else { cont.resume(returning: nil); return }
+                guard box.value.status == .completed else { cont.resume(returning: nil); return }
                 let data = try? Data(contentsOf: outputURL)
                 cont.resume(returning: data)
             }

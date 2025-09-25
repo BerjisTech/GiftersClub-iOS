@@ -113,6 +113,9 @@ struct AccountView: View {
 
                 // Legal links
                 VStack(spacing: 8) {
+                    Link("Report a Problem / Contact", destination: SupabaseConfig.webBase.appendingPathComponent("contact"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Link("Privacy Policy", destination: SupabaseConfig.webBase.appendingPathComponent("privacy"))
                         .font(.footnote)
                         .foregroundStyle(.secondary)

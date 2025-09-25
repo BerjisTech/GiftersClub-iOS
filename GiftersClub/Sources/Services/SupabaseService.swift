@@ -38,6 +38,7 @@ final class SupabaseManager: ObservableObject {
             if let pub = try? E2EEKeyManager.shared.publicKeyBase64() {
                 await self.upsertMyPublicKey(pub)
             }
+            await self.syncLocalLegalAcceptance()
         }
 
         // Listen to auth state changes (Supabase Swift async sequence)
@@ -54,6 +55,7 @@ final class SupabaseManager: ObservableObject {
                         await self.upsertMyPublicKey(pub)
                     }
                     await self.evaluateUsernameRequirement()
+                    await self.syncLocalLegalAcceptance()
                     await MainActor.run {
                         if self.needsUsernameSetup == false {
                             NotificationCenter.default.post(name: Notification.Name("signedIn"), object: nil)
@@ -1974,18 +1976,93 @@ final class SupabaseManager: ObservableObject {
     }
 
     // MARK: - User Settings (interaction privacy)
-    struct DBUserSettings: Decodable { let user_id: String; let who_can_interact: String? }
+    struct DBUserSettings: Decodable {
+        let user_id: String
+        let who_can_interact: String?
+        let is_over_18: Bool?
+        let accepted_eula_at: String?
+        let not_interested_user_ids: [String]?
+        let not_interested_media_types: [String]?
+        let not_interested_access_types: [String]?
+    }
     func fetchMyUserSettings() async -> DBUserSettings? {
         guard let me = user?.id.uuidString else { return nil }
         if let res: PostgrestResponse<[DBUserSettings]> = try? await client
             .from("user_settings")
-            .select("user_id,who_can_interact")
+            .select("user_id,who_can_interact,is_over_18,accepted_eula_at,not_interested_user_ids,not_interested_media_types,not_interested_access_types")
             .eq("user_id", value: me)
             .limit(1)
             .execute() {
             return res.value.first
         }
         return nil
+    }
+    struct UserSettingsPatch: Encodable {
+        let user_id: String
+        let who_can_interact: String?
+        let is_over_18: Bool?
+        let accepted_eula_at: String?
+        let not_interested_user_ids: [String]?
+        let not_interested_media_types: [String]?
+        let not_interested_access_types: [String]?
+        init(user_id: String,
+             who_can_interact: String? = nil,
+             is_over_18: Bool? = nil,
+             accepted_eula_at: String? = nil,
+             not_interested_user_ids: [String]? = nil,
+             not_interested_media_types: [String]? = nil,
+             not_interested_access_types: [String]? = nil) {
+            self.user_id = user_id
+            self.who_can_interact = who_can_interact
+            self.is_over_18 = is_over_18
+            self.accepted_eula_at = accepted_eula_at
+            self.not_interested_user_ids = not_interested_user_ids
+            self.not_interested_media_types = not_interested_media_types
+            self.not_interested_access_types = not_interested_access_types
+        }
+    }
+    /// Merge-patch current user's user_settings with provided values.
+    private func upsertMyUserSettings(_ patch: UserSettingsPatch) async {
+        _ = try? await client
+            .from("user_settings")
+            .upsert([patch])
+            .execute()
+    }
+    /// Sync local legal acceptance (UserDefaults) to server on sign-in.
+    func syncLocalLegalAcceptance() async {
+        guard let _ = user?.id.uuidString else { return }
+        let over18 = UserDefaults.standard.bool(forKey: "gc_is_over_18")
+        let eulaDate = UserDefaults.standard.object(forKey: "gc_eula_accepted_at") as? Date
+        if over18 || eulaDate != nil {
+            let iso = eulaDate.map { ISO8601DateFormatter().string(from: $0) }
+            let patch = UserSettingsPatch(user_id: user!.id.uuidString, is_over_18: over18 ? true : nil, accepted_eula_at: iso)
+            await upsertMyUserSettings(patch)
+        }
+    }
+    // Not-interested preferences
+    func addNotInterestedCreator(_ creatorUserId: String) async {
+        guard let _ = user?.id.uuidString else { return }
+        let current = await fetchMyUserSettings()
+        var arr = current?.not_interested_user_ids ?? []
+        if !arr.contains(creatorUserId) { arr.append(creatorUserId) }
+        let patch = UserSettingsPatch(user_id: user!.id.uuidString, not_interested_user_ids: arr)
+        await upsertMyUserSettings(patch)
+    }
+    func addNotInterestedMediaType(_ mediaType: String) async {
+        guard let _ = user?.id.uuidString else { return }
+        let current = await fetchMyUserSettings()
+        var arr = current?.not_interested_media_types ?? []
+        if !arr.contains(mediaType) { arr.append(mediaType) }
+        let patch = UserSettingsPatch(user_id: user!.id.uuidString, not_interested_media_types: arr)
+        await upsertMyUserSettings(patch)
+    }
+    func addNotInterestedAccessType(_ accessType: String) async {
+        guard let _ = user?.id.uuidString else { return }
+        let current = await fetchMyUserSettings()
+        var arr = current?.not_interested_access_types ?? []
+        if !arr.contains(accessType) { arr.append(accessType) }
+        let patch = UserSettingsPatch(user_id: user!.id.uuidString, not_interested_access_types: arr)
+        await upsertMyUserSettings(patch)
     }
     func updateInteractionSetting(_ who: String) async throws {
         guard let me = user?.id.uuidString else { throw URLError(.userAuthenticationRequired) }

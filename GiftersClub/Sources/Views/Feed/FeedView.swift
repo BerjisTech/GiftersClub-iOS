@@ -146,6 +146,16 @@ struct HomeView: View {
             guard let id = note.object as? String, let p = posts.first(where: { $0.id == id }) else { return }
             sharePost = p
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("remove_post_from_feed"))) { note in
+            guard let id = note.object as? String else { return }
+            if let pIdx = posts.firstIndex(where: { $0.id == id }) {
+                posts.remove(at: pIdx)
+            }
+            if let iIdx = items.firstIndex(where: { if case let .post(p) = $0 { return p.id == id } else { return false } }) {
+                items.remove(at: iIdx)
+                if selection >= items.count { selection = max(0, items.count - 1) }
+            }
+        }
         .onChange(of: selection, perform: { newIndex in
             // Load more when near the end
             if newIndex >= posts.count - 3 {
@@ -168,6 +178,7 @@ struct HomeView: View {
             #endif
             let rows = try await supabase.fetchFeed(limit: 50, offset: 0)
             var mapped = rows.compactMap(mapRow)
+            mapped = await applySafetyFilters(mapped)
             // Always randomize local ordering so refreshes do not repeat
             mapped.shuffle()
             // Initialize liked state for current user
@@ -218,6 +229,7 @@ struct HomeView: View {
             #endif
             let rows = try await supabase.fetchFeed(limit: 50, offset: offset)
             var mapped = rows.compactMap(mapRow)
+            mapped = await applySafetyFilters(mapped)
             // Randomize the new page before interleaving
             mapped.shuffle()
             if mapped.isEmpty { return }
@@ -274,6 +286,91 @@ struct HomeView: View {
             shares: r.share_count ?? 0,
             isLiked: false
         )
+    }
+}
+
+// MARK: - Safety filters (blocklist + not-interested)
+extension HomeView {
+    /// Apply client-side safety filters before rendering the feed.
+    fileprivate func applySafetyFilters(_ items: [FeedPost]) async -> [FeedPost] {
+        // Fetch settings and blocks once per call
+        let settings = await supabase.fetchMyUserSettings()
+        let blocked = (try? await supabase.fetchBlockedUsers()) ?? []
+        let filteredWords = (try? await supabase.fetchFilteredWords()) ?? []
+        let blockedIds = Set(blocked.map { $0.user_id })
+        let niCreators = Set(settings?.not_interested_user_ids ?? [])
+        let niAccess = Set(settings?.not_interested_access_types ?? [])
+        let niMedia = Set(settings?.not_interested_media_types ?? [])
+        return items.filter { p in
+            if blockedIds.contains(p.author.userId) { return false }
+            if niCreators.contains(p.author.userId) { return false }
+            if let t = p.accessType, niAccess.contains(t) { return false }
+            // Determine media type for NI
+            let mt: String? = {
+                switch p.media {
+                case .video: return "video"
+                case .image, .images: return "photo"
+                }
+            }()
+            if let mt, niMedia.contains(mt) { return false }
+            // Filtered words in caption
+            if !filteredWords.isEmpty {
+                let lower = p.caption.lowercased()
+                if filteredWords.contains(where: { !($0.trimmingCharacters(in: .whitespaces).isEmpty) && lower.contains($0.lowercased()) }) { return false }
+            }
+            return true
+        }
+    }
+}
+
+// MARK: - Moderation Drawer View
+private struct ModerationDrawer: View {
+    let username: String
+    let hasVideo: Bool
+    @Binding var actionNotInterested: Bool
+    @Binding var actionBlock: Bool
+    @Binding var actionReport: Bool
+    @Binding var notInterestedCreator: Bool
+    @Binding var notInterestedType: Bool
+    var onCancel: () -> Void
+    var onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Content preferences").font(.subheadline).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                pill(title: "Not interested", isOn: $actionNotInterested)
+                pill(title: "Block @\(username)", isOn: $actionBlock)
+                pill(title: "Report @\(username)", isOn: $actionReport)
+            }
+            if actionNotInterested {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Refine \"Not interested\":").font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        pill(title: "This creator", isOn: $notInterestedCreator)
+                        pill(title: hasVideo ? "This type of content" : "This type of content", isOn: $notInterestedType)
+                    }
+                }
+                .transition(.opacity)
+            }
+            HStack { Spacer();
+                Button("Cancel", action: onCancel).buttonStyle(.bordered)
+                Button("Save") { onSave() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(16)
+    }
+
+    private func pill(title: String, isOn: Binding<Bool>) -> some View {
+        Button(action: { isOn.wrappedValue.toggle() }) {
+            Text(title).font(.footnote)
+                .foregroundStyle(isOn.wrappedValue ? .red : .primary)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(isOn.wrappedValue ? Color.red.opacity(0.1) : Color.clear)
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(isOn.wrappedValue ? Color.red : Color.secondary.opacity(0.4), lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+        }.buttonStyle(.plain)
     }
 }
 
@@ -397,6 +494,13 @@ struct PostPageView: View {
     @ObservedObject private var supabase = SupabaseManager.shared
     @State private var authorUserId: String? = nil
     @State private var isFollowing: Bool = false
+    // Moderation drawer state
+    @State private var showModeration: Bool = false
+    @State private var actionNotInterested: Bool = false
+    @State private var actionBlock: Bool = false
+    @State private var actionReport: Bool = false
+    @State private var notInterestedCreator: Bool = false
+    @State private var notInterestedType: Bool = false
 
     var overlaysHidden: Bool { magnify > 1.01 || isPaused }
     private var isOwnPost: Bool { (supabase.user?.id.uuidString ?? "") == post.author.userId }
@@ -411,6 +515,7 @@ struct PostPageView: View {
                 .scaleEffect(magnify)
                 .gesture(singleTap)
                 .simultaneousGesture(magnifyGesture)
+                .onLongPressGesture(minimumDuration: 0.6) { openModeration() }
 
             if showHeart {
                 #if canImport(DotLottie)
@@ -450,6 +555,23 @@ struct PostPageView: View {
             if !hasAccess { paywall }
         }
         .simultaneousGesture(doubleTap)
+        .sheet(isPresented: $showModeration) {
+            ModerationDrawer(
+                username: post.author.username,
+                hasVideo: {
+                    if case .video = post.media { return true } else { return false }
+                }(),
+                actionNotInterested: $actionNotInterested,
+                actionBlock: $actionBlock,
+                actionReport: $actionReport,
+                notInterestedCreator: $notInterestedCreator,
+                notInterestedType: $notInterestedType,
+                onCancel: { showModeration = false },
+                onSave: { Task { await applyModerationAndRemove() } }
+            )
+            .presentationDetents([.height(260)])
+            .presentationDragIndicator(.visible)
+        }
         .onChange(of: isActive, perform: { active in
             if !active { isPaused = false; magnify = 1.0 }
         })
@@ -464,6 +586,36 @@ struct PostPageView: View {
             }
         }
         .task { await checkAccess() }
+    }
+
+    private func openModeration() {
+        actionNotInterested = false; actionBlock = false; actionReport = false; notInterestedCreator = false; notInterestedType = false; showModeration = true
+    }
+
+    private func applyModerationAndRemove() async {
+        defer { showModeration = false }
+        // Perform selected actions
+        if actionBlock {
+            try? await supabase.blockUser(targetUserId: post.author.userId)
+        }
+        if actionReport {
+            try? await supabase.reportUser(reportedUserId: post.author.userId, reason: "Inappropriate content")
+        }
+        if actionNotInterested {
+            if !notInterestedCreator && !notInterestedType {
+                // Default intelligently based on media presence
+                if case .video = post.media { notInterestedType = true } else { notInterestedCreator = true }
+            }
+            if notInterestedCreator { await supabase.addNotInterestedCreator(post.author.userId) }
+            if notInterestedType {
+                let mt = {
+                    switch post.media { case .video: return "video"; default: return "photo" }
+                }()
+                await supabase.addNotInterestedMediaType(mt)
+            }
+        }
+        // Immediately remove the post from current feed
+        NotificationCenter.default.post(name: .init("remove_post_from_feed"), object: post.id)
     }
 
     @ViewBuilder
