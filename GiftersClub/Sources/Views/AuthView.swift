@@ -6,7 +6,6 @@ struct AuthView: View {
     @State private var errorText: String? = nil
     @State private var isLoadingGoogle: Bool = false
     @State private var acceptedTerms: Bool = false
-    @State private var isOver18: Bool = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -20,15 +19,11 @@ struct AuthView: View {
             Spacer()
             VStack(alignment: .leading, spacing: 10) {
                 Toggle(isOn: $acceptedTerms) {
-                    HStack(spacing: 4) {
-                        Text("I agree to the ")
-                        Link("Terms/EULA", destination: SupabaseConfig.webBase.appendingPathComponent("terms"))
-                        Text(" and understand we have zero tolerance for objectionable content or abuse.")
-                    }
-                }
-                .toggleStyle(.switch)
-                Toggle(isOn: $isOver18) {
-                    Text("I confirm I am 18+")
+                    Text(agreementAttributed())
+                        .font(.footnote)
+                        .foregroundStyle(.primary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .toggleStyle(.switch)
                 if let err = errorText { Text(err).foregroundColor(.red).font(.footnote) }
@@ -43,7 +38,7 @@ struct AuthView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(isLoadingGoogle || !acceptedTerms || !isOver18)
+            .disabled(isLoadingGoogle || !acceptedTerms)
             .padding(.horizontal, 24)
             // Sign in with Apple (native)
             SignInWithAppleButton(.signIn) { request in
@@ -73,7 +68,7 @@ struct AuthView: View {
             .signInWithAppleButtonStyle(.black)
             .frame(height: 45)
             .padding(.horizontal, 24)
-            .disabled(!acceptedTerms || !isOver18)
+            .disabled(!acceptedTerms)
             .alert("Sign in error", isPresented: Binding(get: { errorText != nil }, set: { _ in errorText = nil })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(errorText ?? "") }
@@ -81,9 +76,8 @@ struct AuthView: View {
         }
     }
     private func signInGoogle() {
-        guard acceptedTerms && isOver18 else { errorText = "Please confirm 18+ and agree to the Terms/EULA."; return }
-        // Persist local legal acceptance for server sync post sign-in
-        UserDefaults.standard.set(true, forKey: "gc_is_over_18")
+        guard acceptedTerms else { errorText = "Please agree to the Terms/EULA to continue."; return }
+        // Persist local legal acceptance timestamp for server sync post sign-in
         UserDefaults.standard.set(Date(), forKey: "gc_eula_accepted_at")
         isLoadingGoogle = true
         Task { @MainActor in }
@@ -91,6 +85,22 @@ struct AuthView: View {
             await SupabaseManager.shared.signInWithGoogle()
             await MainActor.run { isLoadingGoogle = false }
         }
+    }
+
+    // Compose an attributed sentence with inline links that wraps as one unit
+    private func agreementAttributed() -> AttributedString {
+        var s = AttributedString("I agree to the Terms of Service and Privacy Policy and understand there is zero tolerance for objectionable content or abusive users.")
+        if let range1 = s.range(of: "Terms of Service") {
+            s[range1].link = SupabaseConfig.webBase.appendingPathComponent("terms")
+            s[range1].foregroundColor = .init(cgColor: UIColor.label.cgColor)
+            s[range1].underlineStyle = .single
+        }
+        if let range2 = s.range(of: "Privacy Policy") {
+            s[range2].link = SupabaseConfig.webBase.appendingPathComponent("privacy")
+            s[range2].foregroundColor = .init(cgColor: UIColor.label.cgColor)
+            s[range2].underlineStyle = .single
+        }
+        return s
     }
 }
 
