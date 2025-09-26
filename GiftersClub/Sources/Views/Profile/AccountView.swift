@@ -14,8 +14,9 @@ struct AccountView: View {
     @State private var showCreditsInfo = false
     @StateObject private var banners = BannerQueue()
 
+    private let maxContentWidth: CGFloat = 520
+
     var body: some View {
-        ZStack(alignment: .top) {
         ScrollView {
             VStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -132,8 +133,14 @@ struct AccountView: View {
                         .padding(.vertical, 8)
                 }
             }
-            .padding()
+            .frame(maxWidth: maxContentWidth)
+            .padding(.horizontal, 24)
+            .padding(.top, 24)
+            .padding(.bottom, CustomBottomBar.barHeight + CustomBottomBar.additionalSafePadding + 8)
+            .frame(maxWidth: .infinity)
         }
+        .scrollIndicators(.visible)
+        .background(Color(uiColor: .systemBackground))
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
@@ -148,7 +155,9 @@ struct AccountView: View {
                 }
             })
         }
-        BannerHost().environmentObject(banners)
+        .overlay(alignment: .top) {
+            BannerHost().environmentObject(banners)
+                .padding(.top, 8)
         }
     }
 

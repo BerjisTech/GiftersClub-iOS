@@ -56,10 +56,18 @@ final class LiveKitPublisher: NSObject, ObservableObject, RoomDelegate {
         do {
             let targetFront = !isFront
             let options = CameraCaptureOptions(position: targetFront ? .front : .back)
+            // LiveKit only applies new capture options while re-enabling the camera.
+            self.cameraOn = false
+            try await room.localParticipant.setCamera(enabled: false)
             let publication = try await room.localParticipant.setCamera(enabled: true, captureOptions: options)
             self.isFront = targetFront
+            self.cameraOn = true
             self.localVideoTrack = publication?.track as? LiveKit.VideoTrack ?? self.room.localParticipant.videoTracks.first?.track as? LiveKit.VideoTrack
-        } catch { }
+        } catch {
+            #if DEBUG
+            print("Camera switch failed: \(error)")
+            #endif
+        }
     }
 
     func setBeautyFilter(enabled: Bool) {

@@ -9,6 +9,8 @@ This note consolidates the actions taken and provides suggested replies for App 
 - Added an in‑app info page: `CreatorCreditsInfoView.swift` and entry points:
   - Question‑mark button next to “Withdraw Credits” on Account.
   - “What are creator credits?” link at top of the Withdraw Credits page.
+- Account screen now constrains width and adds extra bottom inset so every control is reachable on iPad (file: `Sources/Views/Profile/AccountView.swift`).
+- Added a global safe-area inset equal to the bottom bar height so all tabs leave enough space above the floating menu (files: `Sources/Views/MainTabView.swift`, `Sources/Views/UI/CustomBottomBar.swift`).
 
 ## Business model clarifications
 
@@ -27,9 +29,12 @@ This note consolidates the actions taken and provides suggested replies for App 
    - “We’ve clarified the product model in‑app. Purchased tokens are consumable and non‑withdrawable. Withdrawals are limited to ‘creator credits,’ which are earned via platform programs and are not in‑app purchases.”
 
 4) Guideline 4.0 / 2.1 – UI and completeness
-   - “We resolved the Buy Tokens sheet interaction issues (removed overlaid title, enabled scrolling and large detent). We verified on iPad Air (5th gen, iPadOS 17/18) that all products are selectable.”
+   - “We resolved the Buy Tokens sheet interaction issues (removed overlaid title, enabled scrolling and large detent). We also updated the Account screen layout so all controls remain reachable on iPad. We verified on iPad Air (5th gen, iPadOS 17/18) that all products are selectable.”
 
-5) Guideline 4.1 – Copycat content
+5) Guideline 2.1 – Performance – IAP completeness
+   - “After each StoreKit transaction we call the existing `purchase-tokens` Supabase Edge Function (same flow web/Android use). This credits the user’s balance immediately and records the StoreKit transaction ID as the reference.”
+
+6) Guideline 4.1 – Copycat content
    - If applicable: “We have removed any imagery that could be confused with third‑party IP,” or attach rights documentation if you have authorization.
 
 ## Reviewer test steps
@@ -49,4 +54,3 @@ This note consolidates the actions taken and provides suggested replies for App 
 ## Notes
 
 - If you later separate balances server‑side (purchased tokens vs. earned credits), the UI already uses “credits” for withdrawals; wire the earned balance field to the Withdraw page when available.
-

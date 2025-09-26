@@ -63,7 +63,7 @@ Review Information (what to include):
 
 ## App Integration (Already Implemented)
 
-- `StoreKitService` loads products, performs purchases, and POSTs to a Supabase Edge Function for validation and crediting.
+- `StoreKitService` loads products, performs purchases, and credits tokens by calling the same `purchase-tokens` Supabase Edge Function that web/Android invoke after Flutterwave payments.
 - `TokenTopUpSheet` lists packs (with prices) and highlights a recommended pack when there's a shortfall; on success it refreshes the user balance and closes with a success callback.
 
 Update these when you finalize product IDs or token counts:
@@ -71,29 +71,20 @@ Update these when you finalize product IDs or token counts:
 - File: `GiftersClub-iOS/GiftersClub/Sources/Services/StoreKitService.swift` (set `token_100` and token grant)
 - (Optional) Move productId→tokens mapping to a Supabase config table for remote control.
 
-## Server Validation Flow (Supabase Edge Function)
+## Server Flow (Supabase Edge Function)
 
-Endpoint name (configurable): `purchase-tokens-iap`.
+Endpoint name: `purchase-tokens`.
 
-The app POSTs JSON:
+Request body:
 
-- `userId`: string
-- `productId`: string
-- `tokens`: number (server may re‑map based on productId)
-- `transactionId`: string
-- `originalTransactionId`: string
-- Either (iOS 18+): `appTransaction` = base64 of `AppTransaction.jsonRepresentation`
-- Or (iOS < 18): `appReceipt` = base64 of the App Store receipt
+- `tokens`: number — matches the selected pack’s grant.
+- `txRef`: string — unique reference stored as `flutterwave_transaction_id` in `token_transactions`.
 
-Server responsibilities:
-
-1. Verify the receipt/transaction with Apple (classic receipt validation or App Store Server API).
-2. Ensure the transaction is for `productId`, not refunded, and not already consumed.
-3. Map `productId` → tokens (e.g., `gift_token` → 70), credit the user, record the transaction, and return 2xx.
+Authentication comes from the Supabase session bearer token; the function infers the user id from the JWT, loads the profile, increments `token_balance`, and inserts a purchase record. StoreKit 2 already verifies the transaction before the function is called, so the current backend workflow only needs to credit tokens.
 
 Troubleshooting tips:
-- If the app reports purchase success but no tokens: check server logs for the `purchase-tokens-iap` function; verify Apple receipt validation and productId mapping.
-- If purchase sheet won’t appear in TestFlight: ensure you’re signed in with a sandbox tester when prompted; confirm IAP is “Cleared for Sale”.
+- If the app reports purchase success but no tokens: check logs for the `purchase-tokens` function; confirm the JWT user id matches the profile row and the body includes non-zero tokens.
+- If the purchase sheet won’t appear in TestFlight: ensure you’re signed in with a sandbox tester when prompted; confirm IAPs are “Cleared for Sale”.
 
 ## Economics (Pack Sizing)
 
@@ -120,7 +111,7 @@ Most apps either:
 - [ ] IAP capability enabled in Xcode target.
 - [ ] Consumable IAPs created in ASC with final product IDs (e.g., `gift_token`).
 - [ ] StoreKit products load in the app (StoreKit config or sandbox tester).
-- [ ] Supabase function `purchase-tokens-iap` validates and credits tokens.
+- [ ] Supabase function `purchase-tokens` credits tokens for the authenticated user.
 - [ ] App refreshes balance and shows success toast after purchase.
 - [ ] Optional: productId→tokens mapping is remote‑configurable.
 

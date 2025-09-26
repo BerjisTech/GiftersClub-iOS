@@ -8,9 +8,6 @@ enum SupabaseConfig {
     static let redirectURL = URL(string: "gifterclub://login-callback")!
     // Base URL for web app where static assets (like gifts images) are hosted
     static let webBase = URL(string: "https://gifters.club")!
-    // Supabase Edge Function to validate IAP and credit tokens
-    static let iapPurchaseFunctionName = "purchase-tokens-iap"
-
     // LiveKit server URL used by the iOS client to connect to the room created by the Edge Function token
     // Example (LiveKit Cloud): wss://yourdomain.livekit.cloud
     // Example (self-hosted):  wss://your.domain:7880

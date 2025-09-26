@@ -81,8 +81,12 @@ final class StoreKitService: ObservableObject {
         switch result {
         case .success(let verification):
             let transaction = try checkVerified(verification)
-            // Send signed payload to backend to validate and credit tokens
-            try await notifyBackendForTokens(userId: userId, tokens: pack.tokens, productId: product.id, transaction: transaction)
+            // Credit tokens via Supabase Edge Function shared across clients
+            try await SupabaseManager.shared.processPurchaseTokens(
+                userId: userId,
+                tokens: pack.tokens,
+                txRef: String(transaction.id)
+            )
             await transaction.finish()
         case .userCancelled:
             throw NSError(domain: "StoreKit", code: -2, userInfo: [NSLocalizedDescriptionKey: "Purchase cancelled"]) 
@@ -102,52 +106,4 @@ final class StoreKitService: ObservableObject {
         }
     }
 
-    private func notifyBackendForTokens(userId: String, tokens: Int, productId: String, transaction: Transaction) async throws {
-        // Build request to Supabase Edge Function for IAP validation + credit
-        let functionURL = SupabaseConfig.url
-            .appendingPathComponent("functions/v1/")
-            .appendingPathComponent(SupabaseConfig.iapPurchaseFunctionName)
-        var req = URLRequest(url: functionURL)
-        req.httpMethod = "POST"
-        req.addValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
-        if let token = try? await SupabaseManager.shared.client.auth.session.accessToken {
-            req.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Include app receipt for server-side verification
-        let receipt = try await fetchAppReceiptBase64()
-        let payload: [String: Any] = [
-            "userId": userId,
-            "productId": productId,
-            "tokens": tokens,
-            "transactionId": String(transaction.id),
-            "originalTransactionId": String(transaction.originalID),
-            "appReceipt": receipt
-        ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw NSError(domain: "IAPCredit", code: (resp as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: msg ?? "Failed to credit tokens"])
-        }
-    }
-
-    private func fetchAppReceiptBase64() async throws -> String {
-        if #available(iOS 18.0, *) {
-            // Prefer AppTransaction JSON for iOS 18+
-            let result = try await AppTransaction.shared
-            let appTx: AppTransaction = try checkVerified(result)
-            return appTx.jsonRepresentation.base64EncodedString()
-        } else {
-            if let url = Bundle.main.appStoreReceiptURL, let data = try? Data(contentsOf: url) , !data.isEmpty {
-                return data.base64EncodedString()
-            }
-            // Request a receipt refresh
-            try await AppStore.sync()
-            guard let url2 = Bundle.main.appStoreReceiptURL, let data2 = try? Data(contentsOf: url2), !data2.isEmpty else {
-                throw NSError(domain: "StoreKit", code: -5, userInfo: [NSLocalizedDescriptionKey: "Missing App Store receipt"])
-            }
-            return data2.base64EncodedString()
-        }
-    }
 }

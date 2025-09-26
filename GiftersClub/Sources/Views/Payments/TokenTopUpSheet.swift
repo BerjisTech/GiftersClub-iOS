@@ -84,7 +84,10 @@ struct TokenTopUpSheet: View {
             _ = try? await supabase.fetchProfile(username: nil, userId: me)
             await MainActor.run { onCompleted?(true); dismiss() }
         } catch {
-            await MainActor.run { errorText = (error as NSError).localizedDescription }
+            #if DEBUG
+            print("Token purchase failed: \(error)")
+            #endif
+            await MainActor.run { errorText = friendlyErrorMessage(for: error) }
         }
         await MainActor.run { isProcessing = false }
     }
@@ -107,6 +110,17 @@ struct TokenTopUpSheet: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.15)))
+    }
+
+    private func friendlyErrorMessage(for error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == "StoreKit" {
+            return ns.localizedDescription
+        }
+        if ns.domain == NSURLErrorDomain {
+            return "We couldn't reach the server. Please check your connection and try again."
+        }
+        return "We couldn't complete the purchase right now. If the charge went through, contact support and we'll help."
     }
 
     init(initialAmount: Int? = nil, onCompleted: ((Bool) -> Void)? = nil) {

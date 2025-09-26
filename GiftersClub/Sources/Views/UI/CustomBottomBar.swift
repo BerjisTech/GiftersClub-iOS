@@ -4,6 +4,7 @@ enum RootTab { case home, explore, chat, profile }
 
 struct CustomBottomBar: View {
     static let barHeight: CGFloat = 70
+    static let additionalSafePadding: CGFloat = 24
     @Binding var selected: RootTab
     var onCompose: () -> Void
 

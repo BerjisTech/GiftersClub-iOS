@@ -34,7 +34,10 @@ struct MainTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: hideBottomBar ? 0 : CustomBottomBar.barHeight) }
+            .safeAreaInset(edge: .bottom) {
+                Color.clear
+                    .frame(height: hideBottomBar ? 0 : CustomBottomBar.barHeight + CustomBottomBar.additionalSafePadding)
+            }
 
             // Global banner host
             VStack { Spacer(minLength: 0) }
